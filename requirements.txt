@@ -1,0 +1,21 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+torchvision==0.21.0+cpu
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+docling
+langchain>=0.3,<0.4
+langchain-core>=0.3,<0.4
+langchain-community>=0.3,<0.4
+langchain-huggingface>=0.1,<0.2
+langchain-weaviate>=0.0.4,<0.1
+weaviate-client
+sentence-transformers
+python-multipart
+pypdf
+transformers>=4.41,<5
+huggingface-hub<1

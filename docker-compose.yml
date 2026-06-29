@@ -1,0 +1,46 @@
+services:
+  weaviate:
+    image: semitechnologies/weaviate:1.27.0
+    container_name: rohan-rag-weaviate
+    init: true
+    ports:
+      - "8082:8080"
+    volumes:
+      - rohan_weaviate_data:/var/lib/weaviate
+    environment:
+      QUERY_DEFAULTS_LIMIT: "25"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      CLUSTER_HOSTNAME: "node1"
+    restart: unless-stopped
+
+  rag-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rohan-rag-api
+    init: true
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8090
+    ports:
+      - "8090:8090"
+    volumes:
+      - rohan_huggingface_cache:/tmp/huggingface
+    environment:
+      RAG_ENABLED: "true"
+      RAG_WORKFLOW: "langchain"
+      RAG_VECTOR_DB: "weaviate"
+      RAG_EMBEDDING_MODEL: "BAAI/bge-m3"
+      WEAVIATE_URL: "http://weaviate:8080"
+      WEAVIATE_COLLECTION: "KnowledgeBase"
+      RAG_TOP_K: "5"
+      RAG_TIMEOUT_SECONDS: "30"
+      HF_HUB_DISABLE_XET: "1"
+      HF_HOME: "/tmp/huggingface"
+    depends_on:
+      - weaviate
+    restart: unless-stopped
+
+volumes:
+  rohan_weaviate_data:
+  rohan_huggingface_cache:
