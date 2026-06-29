@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
 from app.config import get_rag_settings
 from app.document_loader import load_file_as_documents, load_text_as_documents
+from app.rag_chain import GeneratorUnavailableError, generate_answer
 from app.schemas import (
     IngestResponse,
     IngestTextRequest,
@@ -31,6 +32,7 @@ def health() -> dict[str, object]:
         "workflow": settings.rag_workflow,
         "vector_db": settings.vector_db,
         "weaviate_collection": settings.weaviate_collection,
+        "generator_model": settings.rag_generator_model,
     }
 
 
@@ -121,9 +123,23 @@ def query(request: QueryRequest) -> QueryResponse:
     settings = get_rag_settings()
     top_k = request.top_k or settings.rag_top_k
     documents = _retrieve_documents(request.question, top_k)
+    sources = [_document_to_source_chunk(document) for document in documents]
+
+    if not documents:
+        return QueryResponse(
+            answer="No relevant indexed information was found for this question.",
+            sources=sources,
+            retrieved_chunk_count=0,
+        )
+
+    try:
+        answer = generate_answer(request.question, documents, settings)
+    except GeneratorUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     return QueryResponse(
-        answer="Phase 2 retrieval-only response. Generator LLM will be added in Phase 3.",
-        sources=[_document_to_source_chunk(document) for document in documents],
+        answer=answer,
+        sources=sources,
         retrieved_chunk_count=len(documents),
     )
 

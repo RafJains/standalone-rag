@@ -1,8 +1,8 @@
 # Rohan Standalone RAG
 
 This is a standalone, domain-neutral RAG service for ingesting, indexing,
-retrieving, and later generating answers from private documents and general
-knowledge sources. It has its own Dockerfile, Docker Compose file, requirements,
+retrieving, and generating answers from private documents and general knowledge
+sources. It has its own Dockerfile, Docker Compose file, requirements,
 environment example, API, and documentation.
 
 Rohan stack:
@@ -11,11 +11,14 @@ Rohan stack:
 - Embeddings: `BAAI/bge-m3`
 - Vector search: Weaviate
 - Workflow: LangChain
-- Generator later: Ministral 3 8B/14B initially, then Mistral Small 4 Open
-  through vLLM for production
+- Generator: local OpenAI-compatible Ministral or Mistral endpoint
 
-Phase 2 is retrieval-only. `/rag/query` retrieves chunks from Weaviate and
-returns sources. It does not call a generator LLM yet.
+Phase 3 adds generator answering. `/rag/query` retrieves chunks from Weaviate,
+builds a grounded prompt, calls the configured local generator endpoint, and
+returns the generated answer with sources. If no relevant chunks are found, the
+API returns a clear no-information answer without calling the generator. If the
+generator server is not running or cannot be reached, `/rag/query` returns HTTP
+503 with a clear local generator unavailable message.
 
 ## Start
 
@@ -62,6 +65,24 @@ curl -X POST "http://localhost:8090/rag/ingest/file" \
 curl -X POST "http://localhost:8090/rag/query" \
   -H "Content-Type: application/json" \
   -d '{"question":"What is the refund policy?","top_k":5}'
+```
+
+## Generator Configuration
+
+```bash
+RAG_GENERATOR_BASE_URL=http://host.docker.internal:8001/v1
+RAG_GENERATOR_API_KEY=not-needed
+RAG_GENERATOR_MODEL=Ministral-3-8B-Instruct
+RAG_GENERATOR_TEMPERATURE=0.1
+RAG_GENERATOR_MAX_TOKENS=512
+RAG_GENERATOR_TIMEOUT_SECONDS=60
+```
+
+Production generator example:
+
+```bash
+RAG_GENERATOR_BASE_URL=http://vllm:8000/v1
+RAG_GENERATOR_MODEL=Mistral-Small-4-Open
 ```
 
 ## Validate Stack

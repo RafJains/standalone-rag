@@ -1,11 +1,11 @@
 # Rohan Standalone RAG Implementation
 
-## Phase 2 Architecture
+## Phase 3 Architecture
 
 This RAG service is a separate project under `RAG/`. It is not wired into the
 any external application codebase, prompts, tools, Dockerfile, requirements, compose file, or environment file.
 
-Phase 2 flow:
+Phase 3 flow:
 
 1. Text or files are accepted by `app.api`.
 2. `app.document_loader` parses documents with Docling when possible.
@@ -13,7 +13,10 @@ Phase 2 flow:
    fallback is used for `.txt`, PDFs via `pypdf`, and Docling API differences.
 4. `app.embeddings` embeds chunks with `BAAI/bge-m3`.
 5. `app.vector_store` writes external vectors and metadata into Weaviate.
-6. Query currently performs retrieval only. Generator LLM integration is Phase 3.
+6. `app.vector_store.similarity_search` retrieves the most relevant chunks.
+7. `app.rag_chain` builds a grounded prompt and calls the configured local
+   OpenAI-compatible generator endpoint through LangChain.
+8. `/rag/query` returns the generated answer, sources, and retrieved chunk count.
 
 ## Rohan Stack
 
@@ -21,8 +24,8 @@ Phase 2 flow:
 - Embeddings: `BAAI/bge-m3`
 - Vector search: Weaviate
 - Workflow: LangChain
-- Initial generator later: Ministral 3 8B/14B
-- Production generator later: Mistral Small 4 Open through vLLM
+- Initial generator: Ministral 3 8B or 14B
+- Production generator: Mistral Small 4 Open through vLLM
 
 ## Startup
 
@@ -74,8 +77,36 @@ curl -X POST "http://localhost:8090/rag/query" \
   -d '{"question":"What is the refund policy?","top_k":5}'
 ```
 
-The response is retrieval-only in Phase 2. It includes matching chunks in
-`sources`, but it does not call a generator LLM.
+When the configured local generator server is running, `/rag/query` returns a
+generated answer grounded in the retrieved chunks. The response includes
+`sources` and `retrieved_chunk_count`.
+
+If no relevant indexed information is found, `/rag/query` returns HTTP 200 with
+a concise no-information answer and no source chunks.
+
+If the generator server is not running or cannot be reached, `/rag/query`
+returns HTTP 503 with a clear message that the local generator LLM is
+unavailable. The API should not crash or restart for this condition.
+
+## Generator Configuration
+
+Default local generator settings:
+
+```bash
+RAG_GENERATOR_BASE_URL=http://host.docker.internal:8001/v1
+RAG_GENERATOR_API_KEY=not-needed
+RAG_GENERATOR_MODEL=Ministral-3-8B-Instruct
+RAG_GENERATOR_TEMPERATURE=0.1
+RAG_GENERATOR_MAX_TOKENS=512
+RAG_GENERATOR_TIMEOUT_SECONDS=60
+```
+
+Production generator example:
+
+```bash
+RAG_GENERATOR_BASE_URL=http://vllm:8000/v1
+RAG_GENERATOR_MODEL=Mistral-Small-4-Open
+```
 
 ## Troubleshooting
 

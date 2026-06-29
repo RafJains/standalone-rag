@@ -7,6 +7,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN = (
+    "live" + "kit",
+    "ho" + "tel",
+    "gem" + "ini",
+    "deep" + "gram",
     "qd" + "rant",
     "mil" + "vus",
     "qw" + "en",

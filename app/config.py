@@ -24,6 +24,13 @@ class RagSettings(BaseSettings):
     rag_top_k: int = Field(default=5, ge=1)
     rag_timeout_seconds: int = Field(default=30, ge=1)
 
+    rag_generator_base_url: str = "http://host.docker.internal:8001/v1"
+    rag_generator_api_key: str = "not-needed"
+    rag_generator_model: str = "Ministral-3-8B-Instruct"
+    rag_generator_temperature: float = Field(default=0.1, ge=0)
+    rag_generator_max_tokens: int = Field(default=512, ge=1)
+    rag_generator_timeout_seconds: int = Field(default=60, ge=1)
+
     @property
     def vector_db(self) -> str:
         return self.rag_vector_db
