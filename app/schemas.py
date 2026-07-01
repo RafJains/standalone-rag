@@ -35,6 +35,25 @@ class QueryResponse(BaseModel):
     retrieved_chunk_count: int = 0
 
 
+class DocumentSummary(BaseModel):
+    source_id: str
+    filename: str | None = None
+    doc_type: str | None = None
+    chunk_count: int = 0
+    page_numbers: list[int] = Field(default_factory=list)
+    preview: str | None = None
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentSummary] = Field(default_factory=list)
+
+
+class DeleteDocumentResponse(BaseModel):
+    source_id: str
+    deleted_count: int
+    message: str
+
+
 class RagStatusResponse(BaseModel):
     service: str
     rag_enabled: bool

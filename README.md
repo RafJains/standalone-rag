@@ -13,12 +13,8 @@ Rohan stack:
 - Workflow: LangChain
 - Generator: local OpenAI-compatible Ministral or Mistral endpoint
 
-Phase 3 adds generator answering. `/rag/query` retrieves chunks from Weaviate,
-builds a grounded prompt, calls the configured local generator endpoint, and
-returns the generated answer with sources. If no relevant chunks are found, the
-API returns a clear no-information answer without calling the generator. If the
-generator server is not running or cannot be reached, `/rag/query` returns HTTP
-503 with a clear local generator unavailable message.
+Phase 4 adds a simple FastAPI-served browser console and document-management
+endpoints. The existing ingestion, status, and query endpoints remain unchanged.
 
 ## Start
 
@@ -30,6 +26,30 @@ docker compose up -d --build
 API host port: `8090`
 
 Weaviate host port: `8082`
+
+## Frontend
+
+Open:
+
+```text
+http://localhost:8090
+```
+
+The frontend is served by FastAPI from `app/static` and uses the same backend
+origin. It calls:
+
+- `GET /health` and `GET /rag/status` for status
+- `POST /rag/ingest/file` for PDF/TXT uploads
+- `POST /rag/ingest/text` for pasted text
+- `GET /rag/documents` to list indexed documents
+- `DELETE /rag/documents/{source_id}` to delete all chunks for a document
+- `POST /rag/query` for question answering
+
+To upload a document, choose a PDF or TXT file, keep or change the `doc_type`,
+and click Upload. To ingest text, paste text, set a filename and `doc_type`, and
+click Ingest Text. To ask questions, enter a question and `top_k`; answers show
+the retrieved sources. To delete a document, refresh the document list and click
+Delete for the matching `source_id`.
 
 ## Health
 
@@ -65,6 +85,20 @@ curl -X POST "http://localhost:8090/rag/ingest/file" \
 curl -X POST "http://localhost:8090/rag/query" \
   -H "Content-Type: application/json" \
   -d '{"question":"What is the refund policy?","top_k":5}'
+```
+
+## Documents
+
+List indexed documents grouped by `source_id`:
+
+```bash
+curl http://localhost:8090/rag/documents
+```
+
+Delete all chunks for a document:
+
+```bash
+curl -X DELETE "http://localhost:8090/rag/documents/<SOURCE_ID>"
 ```
 
 ## Generator Configuration

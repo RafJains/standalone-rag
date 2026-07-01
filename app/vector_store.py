@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 import weaviate
 from langchain_core.documents import Document
 from weaviate.classes.config import Configure, DataType, Property
-from weaviate.classes.query import MetadataQuery
+from weaviate.classes.query import Filter, MetadataQuery
 from weaviate.exceptions import WeaviateBaseError
 
 from app.config import get_rag_settings
@@ -111,6 +111,83 @@ def similarity_search(query: str, top_k: int) -> list[Document]:
         client.close()
 
 
+def list_documents() -> list[dict[str, Any]]:
+    client = get_weaviate_client()
+    documents_by_source: dict[str, dict[str, Any]] = {}
+
+    try:
+        ensure_collection(client)
+        collection = client.collections.get(get_rag_settings().weaviate_collection)
+        for item in collection.iterator(
+            return_properties=[
+                "text",
+                "source_id",
+                "filename",
+                "doc_type",
+                "chunk_index",
+                "page_number",
+            ]
+        ):
+            properties = item.properties or {}
+            source_id = properties.get("source_id")
+            if not source_id:
+                continue
+
+            source_key = str(source_id)
+            summary = documents_by_source.setdefault(
+                source_key,
+                {
+                    "source_id": source_key,
+                    "filename": properties.get("filename"),
+                    "doc_type": properties.get("doc_type"),
+                    "chunk_count": 0,
+                    "page_numbers": set(),
+                    "preview": None,
+                    "_first_chunk_index": None,
+                },
+            )
+            summary["chunk_count"] += 1
+            if not summary.get("filename") and properties.get("filename"):
+                summary["filename"] = properties.get("filename")
+            if not summary.get("doc_type") and properties.get("doc_type"):
+                summary["doc_type"] = properties.get("doc_type")
+
+            page_number = _int_or_none(properties.get("page_number"))
+            if page_number is not None:
+                summary["page_numbers"].add(page_number)
+
+            chunk_index = _int_or_none(properties.get("chunk_index"))
+            text = (properties.get("text") or "").strip()
+            first_chunk_index = summary.get("_first_chunk_index")
+            if text and (first_chunk_index is None or chunk_index is None or chunk_index < first_chunk_index):
+                summary["preview"] = _preview_text(text)
+                summary["_first_chunk_index"] = chunk_index
+
+        summaries = []
+        for summary in documents_by_source.values():
+            summary["page_numbers"] = sorted(summary["page_numbers"])
+            summary.pop("_first_chunk_index", None)
+            summaries.append(summary)
+        return sorted(summaries, key=lambda item: (item.get("filename") or "", item["source_id"]))
+    except WeaviateBaseError as exc:
+        raise RuntimeError(f"Could not list documents from Weaviate: {exc}") from exc
+    finally:
+        client.close()
+
+
+def delete_documents_by_source_id(source_id: str) -> int:
+    client = get_weaviate_client()
+    try:
+        ensure_collection(client)
+        collection = client.collections.get(get_rag_settings().weaviate_collection)
+        result = collection.data.delete_many(where=Filter.by_property("source_id").equal(source_id))
+        return _deleted_count(result)
+    except WeaviateBaseError as exc:
+        raise RuntimeError(f"Could not delete documents from Weaviate: {exc}") from exc
+    finally:
+        client.close()
+
+
 def check_weaviate_ready() -> tuple[bool, str]:
     try:
         client = get_weaviate_client()
@@ -151,6 +228,28 @@ def _object_to_document(item: Any) -> Document:
     if distance is not None:
         metadata["distance"] = distance
     return Document(page_content=properties.get("text") or "", metadata=metadata)
+
+
+def _deleted_count(result: Any) -> int:
+    for attribute in ("successful", "matches"):
+        value = getattr(result, attribute, None)
+        if isinstance(value, int):
+            return value
+
+    if isinstance(result, dict):
+        for key in ("successful", "matches"):
+            value = result.get(key)
+            if isinstance(value, int):
+                return value
+
+    return 0
+
+
+def _preview_text(text: str, limit: int = 240) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."
 
 
 def _string_or_none(value: Any) -> str | None:

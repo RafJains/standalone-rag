@@ -1,11 +1,15 @@
 # Rohan Standalone RAG Implementation
 
-## Phase 3 Architecture
+## Phase 4 Architecture
 
 This RAG service is a separate project under `RAG/`. It is not wired into the
-any external application codebase, prompts, tools, Dockerfile, requirements, compose file, or environment file.
+any external application codebase, prompts, tools, Dockerfile, requirements,
+compose file, or environment file.
 
-Phase 3 flow:
+Phase 4 keeps the Phase 3 RAG flow and adds a small FastAPI-served frontend plus
+document listing and deletion APIs.
+
+RAG flow:
 
 1. Text or files are accepted by `app.api`.
 2. `app.document_loader` parses documents with Docling when possible.
@@ -17,6 +21,23 @@ Phase 3 flow:
 7. `app.rag_chain` builds a grounded prompt and calls the configured local
    OpenAI-compatible generator endpoint through LangChain.
 8. `/rag/query` returns the generated answer, sources, and retrieved chunk count.
+
+Document-management flow:
+
+1. `GET /rag/documents` reads the generic `KnowledgeBase` collection and groups
+   chunks by `source_id`.
+2. Each summary includes filename, document type, chunk count, available page
+   numbers, and a short preview when text is available.
+3. `DELETE /rag/documents/{source_id}` deletes all matching chunks from
+   Weaviate and returns the number deleted. Missing source IDs return
+   `deleted_count: 0`.
+
+Frontend flow:
+
+1. `GET /` serves `app/static/index.html`.
+2. `/static/styles.css` and `/static/app.js` provide the vanilla browser UI.
+3. The browser calls the same local FastAPI endpoints; there is no separate
+   frontend service, package manager, CDN, or build step.
 
 ## Rohan Stack
 
@@ -35,6 +56,29 @@ docker compose up -d --build
 ```
 
 This starts only `rohan-rag-weaviate` and `rohan-rag-api`.
+
+## Frontend Console
+
+Open:
+
+```text
+http://localhost:8090
+```
+
+The console has panels for service status, file upload, text ingestion, indexed
+documents, and question answering.
+
+To upload documents, use the Upload Document panel with a PDF or TXT file and a
+`doc_type` such as `general`.
+
+To ingest pasted text, use the Ingest Text panel with a filename and `doc_type`.
+
+To ask questions, use the Ask a Question panel. The response shows the answer
+and source chunks with filename, document type, chunk index, page number,
+distance, and text preview.
+
+To delete documents, refresh the Documents panel and click Delete on the target
+document. The UI confirms before calling `DELETE /rag/documents/{source_id}`.
 
 ## Health Check
 
@@ -87,6 +131,37 @@ a concise no-information answer and no source chunks.
 If the generator server is not running or cannot be reached, `/rag/query`
 returns HTTP 503 with a clear message that the local generator LLM is
 unavailable. The API should not crash or restart for this condition.
+
+## Document Management
+
+List indexed documents:
+
+```bash
+curl http://localhost:8090/rag/documents
+```
+
+Example response:
+
+```json
+{
+  "documents": [
+    {
+      "source_id": "example-source-id",
+      "filename": "sample-policy.txt",
+      "doc_type": "general",
+      "chunk_count": 1,
+      "page_numbers": [],
+      "preview": "The refund policy allows cancellation within 7 days..."
+    }
+  ]
+}
+```
+
+Delete all chunks for a source:
+
+```bash
+curl -X DELETE "http://localhost:8090/rag/documents/<SOURCE_ID>"
+```
 
 ## Generator Configuration
 

@@ -4,11 +4,16 @@ from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_rag_settings
 from app.document_loader import load_file_as_documents, load_text_as_documents
 from app.rag_chain import GeneratorUnavailableError, generate_answer
 from app.schemas import (
+    DeleteDocumentResponse,
+    DocumentListResponse,
+    DocumentSummary,
     IngestResponse,
     IngestTextRequest,
     QueryRequest,
@@ -16,10 +21,28 @@ from app.schemas import (
     RagStatusResponse,
     SourceChunk,
 )
-from app.vector_store import add_documents, check_weaviate_ready, similarity_search
+from app.vector_store import (
+    add_documents,
+    check_weaviate_ready,
+    delete_documents_by_source_id,
+    list_documents,
+    similarity_search,
+)
 
 
 app = FastAPI(title="Rohan Standalone RAG API", version="0.1.0")
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def frontend() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.head("/", include_in_schema=False)
+def frontend_head() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/health")
@@ -49,6 +72,39 @@ def rag_status() -> RagStatusResponse:
         weaviate_url=settings.weaviate_url,
         weaviate_collection=settings.weaviate_collection,
         weaviate_reachable=reachable,
+        message=message,
+    )
+
+
+@app.get("/rag/documents", response_model=DocumentListResponse)
+def documents() -> DocumentListResponse:
+    try:
+        summaries = list_documents()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return DocumentListResponse(
+        documents=[DocumentSummary(**summary) for summary in summaries]
+    )
+
+
+@app.delete("/rag/documents/{source_id}", response_model=DeleteDocumentResponse)
+def delete_document(source_id: str) -> DeleteDocumentResponse:
+    if not source_id.strip():
+        raise HTTPException(status_code=400, detail="source_id cannot be empty")
+
+    try:
+        deleted_count = delete_documents_by_source_id(source_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if deleted_count:
+        message = f"Deleted {deleted_count} chunk(s) for source_id {source_id}."
+    else:
+        message = f"No indexed chunks found for source_id {source_id}."
+
+    return DeleteDocumentResponse(
+        source_id=source_id,
+        deleted_count=deleted_count,
         message=message,
     )
 

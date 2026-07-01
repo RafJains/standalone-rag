@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Standalone RAG Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>Standalone RAG Console</h1>
+        <p>Upload documents, ask questions, and inspect sources.</p>
+      </div>
+      <button id="refresh-status" type="button">Refresh Status</button>
+    </header>
+
+    <main class="layout">
+      <section class="panel status-panel" aria-labelledby="status-title">
+        <div class="panel-heading">
+          <h2 id="status-title">Status</h2>
+          <span id="status-badge" class="badge">Checking</span>
+        </div>
+        <dl class="status-grid">
+          <div>
+            <dt>API</dt>
+            <dd id="api-status">-</dd>
+          </div>
+          <div>
+            <dt>Weaviate</dt>
+            <dd id="weaviate-status">-</dd>
+          </div>
+          <div>
+            <dt>Collection</dt>
+            <dd id="collection-name">-</dd>
+          </div>
+          <div>
+            <dt>Generator</dt>
+            <dd id="generator-model">-</dd>
+          </div>
+        </dl>
+        <p id="status-message" class="message muted"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="file-upload-title">
+        <h2 id="file-upload-title">Upload Document</h2>
+        <form id="file-form" class="form-stack">
+          <label>
+            PDF or TXT file
+            <input id="file-input" name="file" type="file" accept=".pdf,.txt,text/plain,application/pdf" required />
+          </label>
+          <label>
+            Document type
+            <input id="file-doc-type" name="doc_type" type="text" value="general" />
+          </label>
+          <button type="submit">Upload</button>
+        </form>
+        <pre id="file-result" class="result-box" aria-live="polite"></pre>
+      </section>
+
+      <section class="panel" aria-labelledby="text-ingest-title">
+        <h2 id="text-ingest-title">Ingest Text</h2>
+        <form id="text-form" class="form-stack">
+          <label>
+            Text
+            <textarea id="text-input" rows="7" required></textarea>
+          </label>
+          <label>
+            Filename
+            <input id="text-filename" type="text" value="manual-note.txt" />
+          </label>
+          <label>
+            Document type
+            <input id="text-doc-type" type="text" value="general" />
+          </label>
+          <button type="submit">Ingest Text</button>
+        </form>
+        <pre id="text-result" class="result-box" aria-live="polite"></pre>
+      </section>
+
+      <section class="panel document-panel" aria-labelledby="documents-title">
+        <div class="panel-heading">
+          <h2 id="documents-title">Documents</h2>
+          <button id="refresh-documents" type="button">Refresh Documents</button>
+        </div>
+        <div id="documents-list" class="document-list" aria-live="polite"></div>
+      </section>
+
+      <section class="panel qa-panel" aria-labelledby="qa-title">
+        <h2 id="qa-title">Ask a Question</h2>
+        <form id="query-form" class="query-form">
+          <label class="question-field">
+            Question
+            <input id="question-input" type="text" placeholder="What is the refund policy?" required />
+          </label>
+          <label class="top-k-field">
+            top_k
+            <input id="top-k-input" type="number" min="1" value="3" />
+          </label>
+          <button type="submit">Ask</button>
+        </form>
+        <div class="answer-block">
+          <h3>Answer</h3>
+          <p id="answer-output" class="message muted">No answer yet.</p>
+        </div>
+        <div>
+          <h3>Sources</h3>
+          <div id="sources-list" class="source-list"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
