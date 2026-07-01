@@ -25,6 +25,7 @@ services:
     ports:
       - "8090:8090"
     volumes:
+      - ./data:/app/data
       - rohan_huggingface_cache:/tmp/huggingface
     environment:
       RAG_ENABLED: "true"

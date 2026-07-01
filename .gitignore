@@ -9,6 +9,8 @@ __pycache__/
 .ruff_cache/
 data/uploads/*
 !data/uploads/.gitkeep
+data/demo_documents/*
+!data/demo_documents/.gitkeep
 logs/
 *.log
 .DS_Store

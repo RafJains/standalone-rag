@@ -21,6 +21,9 @@ class IngestTextRequest(BaseModel):
 class IngestResponse(BaseModel):
     source_id: str
     chunks_indexed: int
+    chunks_skipped: int = 0
+    duplicate: bool = False
+    stored_file_path: str | None = None
     message: str
 
 
@@ -38,10 +41,14 @@ class QueryResponse(BaseModel):
 class DocumentSummary(BaseModel):
     source_id: str
     filename: str | None = None
+    original_filename: str | None = None
     doc_type: str | None = None
     chunk_count: int = 0
     page_numbers: list[int] = Field(default_factory=list)
     preview: str | None = None
+    stored_file_path: str | None = None
+    original_file_available: bool = False
+    document_hash: str | None = None
 
 
 class DocumentListResponse(BaseModel):
@@ -51,6 +58,7 @@ class DocumentListResponse(BaseModel):
 class DeleteDocumentResponse(BaseModel):
     source_id: str
     deleted_count: int
+    deleted_files: list[str] = Field(default_factory=list)
     message: str
 
 

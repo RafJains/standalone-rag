@@ -1,36 +1,61 @@
 # Rohan Standalone RAG Implementation
 
-## Phase 4 Architecture
+## Phase 4.5 Architecture
 
 This RAG service is a separate project under `RAG/`. It is not wired into the
 any external application codebase, prompts, tools, Dockerfile, requirements,
 compose file, or environment file.
 
-Phase 4 keeps the Phase 3 RAG flow and adds a small FastAPI-served frontend plus
-document listing and deletion APIs.
+Phase 4.5 keeps the RAG flow and adds saved originals, duplicate prevention,
+download support, clean delete, and a small FastAPI-served frontend.
 
 RAG flow:
 
 1. Text or files are accepted by `app.api`.
-2. `app.document_loader` parses documents with Docling when possible.
-3. Docling `HybridChunker` is used when available. A conservative text chunking
+2. The API creates a `source_id`, computes a document hash, and checks Weaviate
+   for an existing document before saving a new copy.
+3. Original uploads and pasted text are saved under
+   `data/uploads/<source_id>/<safe_filename>`.
+4. `app.document_loader` parses documents with Docling when possible.
+5. Docling `HybridChunker` is used when available. A conservative text chunking
    fallback is used for `.txt`, PDFs via `pypdf`, and Docling API differences.
-4. `app.embeddings` embeds chunks with `BAAI/bge-m3`.
-5. `app.vector_store` writes external vectors and metadata into Weaviate.
-6. `app.vector_store.similarity_search` retrieves the most relevant chunks.
-7. `app.rag_chain` builds a grounded prompt and calls the configured local
+6. Each chunk receives storage metadata, `document_hash`, and `content_hash`.
+7. `app.embeddings` embeds new chunks with `BAAI/bge-m3`.
+8. `app.vector_store` writes external vectors and metadata into Weaviate.
+9. `app.vector_store.similarity_search` retrieves the most relevant chunks.
+10. `app.rag_chain` builds a grounded prompt and calls the configured local
    OpenAI-compatible generator endpoint through LangChain.
-8. `/rag/query` returns the generated answer, sources, and retrieved chunk count.
+11. `/rag/query` returns the generated answer, sources, and retrieved chunk
+    count.
+
+Storage layout:
+
+```text
+data/
+  uploads/
+    <source_id>/
+      <safe_filename>
+  demo_documents/
+```
+
+Original files are normal files in `data/uploads`. Indexed chunks, vectors, and
+metadata are stored in Weaviate in the generic `KnowledgeBase` collection. The
+two are intentionally separate: deleting a stored original file alone would not
+remove indexed chunks, and deleting chunks alone would not remove a saved file.
 
 Document-management flow:
 
 1. `GET /rag/documents` reads the generic `KnowledgeBase` collection and groups
    chunks by `source_id`.
-2. Each summary includes filename, document type, chunk count, available page
-   numbers, and a short preview when text is available.
-3. `DELETE /rag/documents/{source_id}` deletes all matching chunks from
-   Weaviate and returns the number deleted. Missing source IDs return
-   `deleted_count: 0`.
+2. Each summary includes filename, original filename, document type, chunk count,
+   available page numbers, preview, stored path, original-file availability, and
+   document hash when available.
+3. `GET /rag/documents/{source_id}/download` returns the saved original file when
+   it still exists.
+4. `DELETE /rag/documents/{source_id}` deletes all matching chunks from
+   Weaviate, removes saved originals listed in metadata, removes an empty
+   `source_id` folder when possible, and returns deleted chunk and file counts.
+   Missing source IDs return `deleted_count: 0`.
 
 Frontend flow:
 
@@ -66,7 +91,8 @@ http://localhost:8090
 ```
 
 The console has panels for service status, file upload, text ingestion, indexed
-documents, and question answering.
+documents, and question answering. It is vanilla HTML, CSS, and JavaScript in
+`app/static`.
 
 To upload documents, use the Upload Document panel with a PDF or TXT file and a
 `doc_type` such as `general`.
@@ -77,8 +103,10 @@ To ask questions, use the Ask a Question panel. The response shows the answer
 and source chunks with filename, document type, chunk index, page number,
 distance, and text preview.
 
-To delete documents, refresh the Documents panel and click Delete on the target
-document. The UI confirms before calling `DELETE /rag/documents/{source_id}`.
+To manage documents, refresh the Documents panel. Cards show whether the
+original file is available and display the stored path when present. Click
+Download to open `/rag/documents/{source_id}/download`, or click Delete to
+remove indexed chunks and any saved original file for that source.
 
 ## Health Check
 
@@ -105,6 +133,9 @@ curl -X POST "http://localhost:8090/rag/ingest/text" \
   -d '{"text":"The refund policy allows cancellation within 7 days of purchase. Support is available from 9 AM to 6 PM.","filename":"test-policy.txt","doc_type":"general"}'
 ```
 
+Pasted text is saved as a `.txt` file under `data/uploads/<source_id>/`. If no
+filename is supplied, the API uses `manual-note.txt`.
+
 ## File Ingestion
 
 ```bash
@@ -112,6 +143,21 @@ curl -X POST "http://localhost:8090/rag/ingest/file" \
   -F "file=@/path/to/sample-document.pdf" \
   -F "doc_type=general"
 ```
+
+File uploads are saved under `data/uploads/<source_id>/` using a sanitized
+filename, then parsed from that saved path.
+
+## Duplicate Prevention
+
+File ingestion computes `document_hash` from file bytes plus `doc_type`. Text
+ingestion computes `document_hash` from normalized text plus filename and
+`doc_type`. If that hash already exists in Weaviate, the API returns the
+existing `source_id`, `chunks_indexed: 0`, `duplicate: true`, and skips saving
+another original file.
+
+Chunk-level prevention uses `content_hash`, computed from normalized chunk text,
+filename, `doc_type`, and `chunk_index`. Existing chunk hashes are skipped and
+reported as `chunks_skipped`.
 
 ## Retrieval Query
 
@@ -148,10 +194,14 @@ Example response:
     {
       "source_id": "example-source-id",
       "filename": "sample-policy.txt",
+      "original_filename": "sample-policy.txt",
       "doc_type": "general",
       "chunk_count": 1,
       "page_numbers": [],
-      "preview": "The refund policy allows cancellation within 7 days..."
+      "preview": "The refund policy allows cancellation within 7 days...",
+      "stored_file_path": "data/uploads/example-source-id/sample-policy.txt",
+      "original_file_available": true,
+      "document_hash": "example-hash"
     }
   ]
 }
@@ -162,6 +212,23 @@ Delete all chunks for a source:
 ```bash
 curl -X DELETE "http://localhost:8090/rag/documents/<SOURCE_ID>"
 ```
+
+Download a saved original file:
+
+```bash
+curl -I "http://localhost:8090/rag/documents/<SOURCE_ID>/download"
+```
+
+Older indexed chunks without `stored_file_path` remain compatible. They list
+with `original_file_available: false`, delete still removes their Weaviate
+chunks, and download returns 404 with a clear message.
+
+## Demo Documents
+
+`data/demo_documents` is for local sample PDFs or TXT files. Move sample files
+there manually, then upload through the UI or `POST /rag/ingest/file` when you
+want them indexed. Files in this directory are ignored by Git except for
+`.gitkeep`.
 
 ## Generator Configuration
 

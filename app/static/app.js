@@ -135,8 +135,31 @@ function renderDocument(documentSummary) {
   if (documentSummary.page_numbers && documentSummary.page_numbers.length) {
     meta.append(metaSpan(`pages: ${documentSummary.page_numbers.join(", ")}`));
   }
+  if (documentSummary.document_hash) {
+    meta.append(metaSpan(`document_hash: ${documentSummary.document_hash}`));
+  }
 
   body.append(title, meta);
+  const badges = document.createElement("div");
+  badges.className = "badge-row";
+  const fileBadge = document.createElement("span");
+  fileBadge.className = documentSummary.original_file_available
+    ? "badge ok"
+    : "badge warn";
+  fileBadge.textContent = documentSummary.original_file_available
+    ? "Original available"
+    : "Original unavailable";
+  badges.append(fileBadge);
+  if (documentSummary.original_filename && documentSummary.original_filename !== documentSummary.filename) {
+    badges.append(metaSpan(`original: ${documentSummary.original_filename}`));
+  }
+  body.append(badges);
+  if (documentSummary.stored_file_path) {
+    const storedPath = document.createElement("p");
+    storedPath.className = "stored-path";
+    storedPath.textContent = documentSummary.stored_file_path;
+    body.append(storedPath);
+  }
   if (documentSummary.preview) {
     const preview = document.createElement("p");
     preview.className = "preview";
@@ -144,13 +167,30 @@ function renderDocument(documentSummary) {
     body.append(preview);
   }
 
+  const actions = document.createElement("div");
+  actions.className = "document-actions";
+  if (documentSummary.original_file_available) {
+    const downloadButton = document.createElement("button");
+    downloadButton.type = "button";
+    downloadButton.className = "secondary";
+    downloadButton.textContent = "Download";
+    downloadButton.addEventListener("click", () => {
+      window.open(
+        `/rag/documents/${encodeURIComponent(documentSummary.source_id)}/download`,
+        "_blank",
+        "noopener",
+      );
+    });
+    actions.append(downloadButton);
+  }
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
   deleteButton.className = "danger";
   deleteButton.textContent = "Delete";
   deleteButton.addEventListener("click", () => deleteDocument(documentSummary.source_id));
+  actions.append(deleteButton);
 
-  wrapper.append(body, deleteButton);
+  wrapper.append(body, actions);
   article.append(wrapper);
   return article;
 }
@@ -162,7 +202,9 @@ function metaSpan(text) {
 }
 
 async function deleteDocument(sourceId) {
-  const confirmed = window.confirm(`Delete all chunks for source_id ${sourceId}?`);
+  const confirmed = window.confirm(
+    `Delete indexed chunks and any stored original file for source_id ${sourceId}?`,
+  );
   if (!confirmed) {
     return;
   }
@@ -172,7 +214,10 @@ async function deleteDocument(sourceId) {
       method: "DELETE",
     });
     await refreshDocuments();
-    elements.statusMessage.textContent = result.message;
+    const deletedFiles = result.deleted_files || [];
+    elements.statusMessage.textContent = deletedFiles.length
+      ? `${result.message} Removed: ${deletedFiles.join(", ")}`
+      : `${result.message} No stored original file was removed.`;
   } catch (error) {
     window.alert(`Delete failed: ${error.message}`);
   }

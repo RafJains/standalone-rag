@@ -1,16 +1,20 @@
 :root {
   color-scheme: light;
-  --bg: #f5f7f9;
-  --panel: #ffffff;
-  --text: #1e252b;
-  --muted: #64717d;
-  --line: #d9e0e6;
-  --accent: #276c8f;
-  --accent-dark: #1d516c;
-  --danger: #b23b3b;
-  --danger-dark: #842b2b;
-  --ok: #1f7a4d;
-  --warn: #9a6418;
+  --bg-a: #eef6f8;
+  --bg-b: #f7efe7;
+  --bg-c: #edf1ff;
+  --glass: rgba(255, 255, 255, 0.68);
+  --glass-strong: rgba(255, 255, 255, 0.82);
+  --text: #1c2730;
+  --muted: #62717d;
+  --line: rgba(116, 134, 148, 0.24);
+  --accent: #226d77;
+  --accent-dark: #174f57;
+  --danger: #ad3f49;
+  --danger-dark: #812d35;
+  --ok: #24744d;
+  --warn: #8b641c;
+  --shadow: 0 22px 50px rgba(44, 61, 74, 0.13);
 }
 
 * {
@@ -18,11 +22,15 @@
 }
 
 body {
+  min-height: 100vh;
   margin: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 14% 12%, rgba(67, 139, 149, 0.18), transparent 34%),
+    radial-gradient(circle at 88% 10%, rgba(214, 145, 85, 0.16), transparent 30%),
+    linear-gradient(135deg, var(--bg-a), var(--bg-b) 52%, var(--bg-c));
   color: var(--text);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   line-height: 1.5;
 }
@@ -35,13 +43,14 @@ textarea {
 
 button {
   min-height: 40px;
-  border: 0;
-  border-radius: 6px;
-  background: var(--accent);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-dark));
   color: #fff;
   cursor: pointer;
   padding: 0 14px;
-  font-weight: 650;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(34, 109, 119, 0.2);
 }
 
 button:hover {
@@ -53,8 +62,20 @@ button:disabled {
   opacity: 0.65;
 }
 
+button.secondary {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent-dark);
+  border-color: rgba(34, 109, 119, 0.24);
+  box-shadow: none;
+}
+
+button.secondary:hover {
+  background: rgba(232, 246, 248, 0.9);
+}
+
 button.danger {
-  background: var(--danger);
+  background: linear-gradient(180deg, var(--danger), var(--danger-dark));
+  box-shadow: 0 10px 24px rgba(173, 63, 73, 0.18);
 }
 
 button.danger:hover {
@@ -66,14 +87,12 @@ button.danger:hover {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 28px clamp(18px, 4vw, 48px);
-  background: #ffffff;
-  border-bottom: 1px solid var(--line);
+  padding: 28px clamp(18px, 4vw, 52px);
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: clamp(1.7rem, 3vw, 2.4rem);
+  font-size: clamp(1.8rem, 3vw, 2.45rem);
   letter-spacing: 0;
 }
 
@@ -86,15 +105,17 @@ button.danger:hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  padding: 22px clamp(18px, 4vw, 48px) 42px;
+  padding: 0 clamp(18px, 4vw, 52px) 44px;
 }
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 18px;
   min-width: 0;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 14px;
+  background: var(--glass);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
 }
 
 .panel h2,
@@ -104,7 +125,7 @@ button.danger:hover {
 }
 
 .panel h2 {
-  font-size: 1.15rem;
+  font-size: 1.12rem;
 }
 
 .panel h3 {
@@ -137,48 +158,61 @@ button.danger:hover {
 }
 
 .status-grid div {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 12px;
   min-height: 76px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.48);
 }
 
 dt {
+  margin-bottom: 4px;
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 700;
-  margin-bottom: 4px;
 }
 
 dd {
   margin: 0;
   overflow-wrap: anywhere;
-  font-weight: 650;
+  font-weight: 700;
 }
 
 .badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
   border-radius: 999px;
-  background: #e6edf2;
+  background: rgba(255, 255, 255, 0.62);
   color: var(--muted);
   padding: 4px 10px;
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   font-weight: 750;
   white-space: nowrap;
 }
 
 .badge.ok {
-  background: #e0f3e9;
+  background: rgba(220, 244, 231, 0.86);
   color: var(--ok);
 }
 
 .badge.warn {
-  background: #fff0d8;
+  background: rgba(255, 239, 204, 0.9);
   color: var(--warn);
 }
 
 .badge.error {
-  background: #fae5e5;
+  background: rgba(250, 225, 228, 0.92);
   color: var(--danger);
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .form-stack {
@@ -197,9 +231,9 @@ label {
 input,
 textarea {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid rgba(90, 111, 126, 0.28);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.74);
   color: var(--text);
   padding: 10px 11px;
   outline: none;
@@ -211,8 +245,8 @@ textarea {
 
 input:focus,
 textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(39, 108, 143, 0.16);
+  border-color: rgba(34, 109, 119, 0.7);
+  box-shadow: 0 0 0 3px rgba(34, 109, 119, 0.15);
 }
 
 .result-box {
@@ -221,8 +255,8 @@ textarea:focus {
   overflow: auto;
   margin: 14px 0 0;
   padding: 12px;
-  border-radius: 6px;
-  background: #f0f3f6;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.58);
   border: 1px solid var(--line);
   color: var(--text);
   white-space: pre-wrap;
@@ -246,21 +280,28 @@ textarea:focus {
 .document-item,
 .source-item {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 14px;
-  background: #fff;
+  background: var(--glass-strong);
 }
 
 .document-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 14px;
   align-items: start;
+}
+
+.document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .item-title {
   margin: 0;
-  font-weight: 750;
+  font-weight: 800;
   overflow-wrap: anywhere;
 }
 
@@ -271,6 +312,16 @@ textarea:focus {
   margin-top: 6px;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.stored-path {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
 }
 
 .preview {
@@ -308,6 +359,10 @@ textarea:focus {
 
   .document-main {
     grid-template-columns: 1fr;
+  }
+
+  .document-actions {
+    justify-content: flex-start;
   }
 
   .panel-heading {
