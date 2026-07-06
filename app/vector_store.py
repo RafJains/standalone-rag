@@ -27,6 +27,10 @@ COLLECTION_PROPERTIES = [
 DOCUMENT_RETURN_PROPERTIES = [prop.name for prop in COLLECTION_PROPERTIES]
 
 
+class HybridRetrievalUnavailableError(RuntimeError):
+    """Raised when Weaviate hybrid search is unavailable for this collection."""
+
+
 def get_weaviate_client() -> weaviate.WeaviateClient:
     settings = get_rag_settings()
     parsed = urlparse(settings.weaviate_url)
@@ -110,7 +114,17 @@ def add_documents(documents: list[Document]) -> tuple[int, int]:
         client.close()
 
 
-def similarity_search(query: str, top_k: int) -> list[Document]:
+def similarity_search(
+    query: str,
+    top_k: int,
+    filters: dict[str, str] | None = None,
+    retrieval_mode: str = "vector",
+) -> list[Document]:
+    if retrieval_mode == "hybrid":
+        return hybrid_search(query=query, top_k=top_k, filters=filters)
+    if retrieval_mode != "vector":
+        raise ValueError(f"Unsupported retrieval_mode: {retrieval_mode}")
+
     embeddings = get_embeddings()
     query_vector = embeddings.embed_query(query)
 
@@ -121,10 +135,48 @@ def similarity_search(query: str, top_k: int) -> list[Document]:
         response = collection.query.near_vector(
             near_vector=query_vector,
             limit=top_k,
+            filters=_build_filters(filters),
+            return_properties=DOCUMENT_RETURN_PROPERTIES,
             return_metadata=MetadataQuery(distance=True),
         )
         return [_object_to_document(item) for item in response.objects]
     except WeaviateBaseError as exc:
+        raise RuntimeError(f"Could not retrieve documents from Weaviate: {exc}") from exc
+    finally:
+        client.close()
+
+
+def hybrid_search(
+    query: str,
+    top_k: int,
+    filters: dict[str, str] | None = None,
+) -> list[Document]:
+    embeddings = get_embeddings()
+    query_vector = embeddings.embed_query(query)
+
+    client = get_weaviate_client()
+    try:
+        ensure_collection(client)
+        collection = client.collections.get(get_rag_settings().weaviate_collection)
+        response = collection.query.hybrid(
+            query=query,
+            vector=query_vector,
+            limit=top_k,
+            filters=_build_filters(filters),
+            return_properties=DOCUMENT_RETURN_PROPERTIES,
+            return_metadata=_metadata_query_with_score(),
+        )
+        return [_object_to_document(item) for item in response.objects]
+    except (AttributeError, TypeError) as exc:
+        raise HybridRetrievalUnavailableError(
+            "Hybrid retrieval is not available in the current configuration."
+        ) from exc
+    except WeaviateBaseError as exc:
+        message = str(exc).lower()
+        if "hybrid" in message or "bm25" in message:
+            raise HybridRetrievalUnavailableError(
+                "Hybrid retrieval is not available in the current configuration."
+            ) from exc
         raise RuntimeError(f"Could not retrieve documents from Weaviate: {exc}") from exc
     finally:
         client.close()
@@ -316,21 +368,50 @@ def _document_properties(document: Document) -> dict[str, Any]:
 
 def _object_to_document(item: Any) -> Document:
     properties = item.properties or {}
+    item_metadata = getattr(item, "metadata", None)
     metadata = {
         "source_id": properties.get("source_id"),
         "filename": properties.get("filename"),
         "original_filename": properties.get("original_filename"),
         "doc_type": properties.get("doc_type"),
-        "chunk_index": properties.get("chunk_index"),
-        "page_number": properties.get("page_number"),
+        "chunk_index": _int_or_none(properties.get("chunk_index")),
+        "page_number": _int_or_none(properties.get("page_number")),
         "stored_file_path": properties.get("stored_file_path"),
         "document_hash": properties.get("document_hash"),
         "content_hash": properties.get("content_hash"),
     }
-    distance = getattr(getattr(item, "metadata", None), "distance", None)
+    distance = getattr(item_metadata, "distance", None)
     if distance is not None:
         metadata["distance"] = distance
+    retrieval_score = _float_or_none(getattr(item_metadata, "score", None))
+    if retrieval_score is not None:
+        metadata["retrieval_score"] = retrieval_score
     return Document(page_content=properties.get("text") or "", metadata=metadata)
+
+
+def _build_filters(filters: dict[str, str] | None) -> Filter | None:
+    if not filters:
+        return None
+
+    clauses = [
+        Filter.by_property(field).equal(str(value).strip())
+        for field, value in filters.items()
+        if value is not None and str(value).strip()
+    ]
+    if not clauses:
+        return None
+
+    combined = clauses[0]
+    for clause in clauses[1:]:
+        combined = combined & clause
+    return combined
+
+
+def _metadata_query_with_score() -> MetadataQuery:
+    try:
+        return MetadataQuery(distance=True, score=True)
+    except TypeError:
+        return MetadataQuery(distance=True)
 
 
 def _ensure_collection_properties(client: weaviate.WeaviateClient) -> None:
@@ -409,5 +490,14 @@ def _int_or_none(value: Any) -> int | None:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None

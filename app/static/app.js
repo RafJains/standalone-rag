@@ -25,6 +25,11 @@ const elements = {
   queryForm: document.querySelector("#query-form"),
   questionInput: document.querySelector("#question-input"),
   topKInput: document.querySelector("#top-k-input"),
+  retrievalModeInput: document.querySelector("#retrieval-mode-input"),
+  queryDocTypeInput: document.querySelector("#query-doc-type-input"),
+  queryFilenameInput: document.querySelector("#query-filename-input"),
+  querySourceIdInput: document.querySelector("#query-source-id-input"),
+  answerMeta: document.querySelector("#answer-meta"),
   answerOutput: document.querySelector("#answer-output"),
   sourcesList: document.querySelector("#sources-list"),
 };
@@ -133,7 +138,7 @@ function renderDocument(documentSummary) {
     metaSpan(`chunks: ${documentSummary.chunk_count}`),
   );
   if (documentSummary.page_numbers && documentSummary.page_numbers.length) {
-    meta.append(metaSpan(`pages: ${documentSummary.page_numbers.join(", ")}`));
+    meta.append(metaSpan(formatPageNumbers(documentSummary.page_numbers)));
   }
   if (documentSummary.document_hash) {
     meta.append(metaSpan(`document_hash: ${documentSummary.document_hash}`));
@@ -279,10 +284,15 @@ async function askQuestion(event) {
   const payload = {
     question: elements.questionInput.value,
     top_k: Number(elements.topKInput.value || 3),
+    retrieval_mode: elements.retrievalModeInput.value || "vector",
   };
+  addOptionalFilter(payload, "doc_type", elements.queryDocTypeInput.value);
+  addOptionalFilter(payload, "filename", elements.queryFilenameInput.value);
+  addOptionalFilter(payload, "source_id", elements.querySourceIdInput.value);
 
   elements.answerOutput.textContent = "Asking...";
   elements.answerOutput.className = "message muted";
+  elements.answerMeta.textContent = "";
   elements.sourcesList.innerHTML = "";
   setFormBusy(elements.queryForm, true);
 
@@ -294,13 +304,35 @@ async function askQuestion(event) {
     });
     elements.answerOutput.textContent = result.answer || "No answer returned.";
     elements.answerOutput.className = "message";
+    renderAnswerMeta(result);
     renderSources(result.sources || []);
   } catch (error) {
     elements.answerOutput.textContent = error.message;
     elements.answerOutput.className = "message error-text";
+    elements.answerMeta.textContent = "";
   } finally {
     setFormBusy(elements.queryForm, false);
   }
+}
+
+function addOptionalFilter(payload, field, value) {
+  const normalized = (value || "").trim();
+  if (normalized) {
+    payload[field] = normalized;
+  }
+}
+
+function renderAnswerMeta(result) {
+  const parts = [];
+  if (result.retrieval_mode) {
+    parts.push(`mode: ${result.retrieval_mode}`);
+  }
+  const filters = result.filters_applied || {};
+  const filterEntries = Object.entries(filters).map(([key, value]) => `${key}=${value}`);
+  if (filterEntries.length) {
+    parts.push(`filters: ${filterEntries.join(", ")}`);
+  }
+  elements.answerMeta.textContent = parts.join(" | ");
 }
 
 function renderSources(sources) {
@@ -324,9 +356,10 @@ function renderSource(source) {
   meta.className = "meta";
   meta.append(
     metaSpan(`type: ${source.doc_type || "unknown"}`),
+    metaSpan(`source_id: ${source.source_id || "unknown"}`),
     metaSpan(`chunk: ${source.chunk_index ?? "unknown"}`),
     metaSpan(`page: ${source.page_number ?? "unknown"}`),
-    metaSpan(`distance: ${formatDistance(source.distance)}`),
+    metaSpan(formatSourceScore(source)),
   );
 
   const preview = document.createElement("p");
@@ -337,6 +370,20 @@ function renderSource(source) {
   return article;
 }
 
+function formatPageNumbers(pageNumbers) {
+  const visiblePages = pageNumbers.slice(0, 12);
+  const remainder = pageNumbers.length - visiblePages.length;
+  const suffix = remainder > 0 ? `, ... +${remainder} more` : "";
+  return `pages: ${visiblePages.join(", ")}${suffix}`;
+}
+
+function formatSourceScore(source) {
+  if (source.retrieval_score !== null && source.retrieval_score !== undefined) {
+    return `score: ${Number(source.retrieval_score).toFixed(4)}`;
+  }
+  return `distance: ${formatDistance(source.distance)}`;
+}
+
 function formatDistance(distance) {
   if (distance === null || distance === undefined) {
     return "unknown";
@@ -345,7 +392,7 @@ function formatDistance(distance) {
 }
 
 function setFormBusy(form, busy) {
-  form.querySelectorAll("button, input, textarea").forEach((control) => {
+  form.querySelectorAll("button, input, select, textarea").forEach((control) => {
     control.disabled = busy;
   });
 }

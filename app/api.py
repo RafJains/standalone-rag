@@ -33,6 +33,7 @@ from app.storage import (
     save_upload_bytes,
 )
 from app.vector_store import (
+    HybridRetrievalUnavailableError,
     add_documents,
     check_weaviate_ready,
     delete_documents_by_source_id,
@@ -284,7 +285,13 @@ def query(request: QueryRequest) -> QueryResponse:
 
     settings = get_rag_settings()
     top_k = request.top_k or settings.rag_top_k
-    documents = _retrieve_documents(request.question, top_k)
+    filters = _query_filters(request)
+    documents = _retrieve_documents(
+        question=request.question,
+        top_k=top_k,
+        filters=filters,
+        retrieval_mode=request.retrieval_mode,
+    )
     sources = [_document_to_source_chunk(document) for document in documents]
 
     if not documents:
@@ -292,6 +299,8 @@ def query(request: QueryRequest) -> QueryResponse:
             answer="No relevant indexed information was found for this question.",
             sources=sources,
             retrieved_chunk_count=0,
+            retrieval_mode=request.retrieval_mode,
+            filters_applied=filters,
         )
 
     try:
@@ -303,6 +312,8 @@ def query(request: QueryRequest) -> QueryResponse:
         answer=answer,
         sources=sources,
         retrieved_chunk_count=len(documents),
+        retrieval_mode=request.retrieval_mode,
+        filters_applied=filters,
     )
 
 
@@ -313,11 +324,32 @@ def _index_documents(documents: list) -> tuple[int, int]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-def _retrieve_documents(question: str, top_k: int) -> list:
+def _retrieve_documents(
+    question: str,
+    top_k: int,
+    filters: dict[str, str],
+    retrieval_mode: str,
+) -> list:
     try:
-        return similarity_search(question, top_k)
+        return similarity_search(
+            query=question,
+            top_k=top_k,
+            filters=filters,
+            retrieval_mode=retrieval_mode,
+        )
+    except HybridRetrievalUnavailableError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _query_filters(request: QueryRequest) -> dict[str, str]:
+    filters = {}
+    for field in ("doc_type", "filename", "source_id"):
+        value = getattr(request, field)
+        if value is not None and value.strip():
+            filters[field] = value.strip()
+    return filters
 
 
 def _document_to_source_chunk(document) -> SourceChunk:
@@ -330,6 +362,10 @@ def _document_to_source_chunk(document) -> SourceChunk:
         page_number=metadata.get("page_number"),
         text=document.page_content,
         distance=metadata.get("distance"),
+        content_hash=metadata.get("content_hash"),
+        document_hash=metadata.get("document_hash"),
+        stored_file_path=metadata.get("stored_file_path"),
+        retrieval_score=metadata.get("retrieval_score"),
     )
 
 

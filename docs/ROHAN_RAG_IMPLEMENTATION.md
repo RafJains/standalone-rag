@@ -1,13 +1,15 @@
 # Rohan Standalone RAG Implementation
 
-## Phase 4.5 Architecture
+## Phase 5 Architecture
 
 This RAG service is a separate project under `RAG/`. It is not wired into the
 any external application codebase, prompts, tools, Dockerfile, requirements,
 compose file, or environment file.
 
-Phase 4.5 keeps the RAG flow and adds saved originals, duplicate prevention,
-download support, clean delete, and a small FastAPI-served frontend.
+Phase 5 keeps the RAG flow and adds saved originals, duplicate prevention,
+download support, clean delete, metadata-filtered retrieval, selectable vector
+or hybrid retrieval mode, richer source metadata, retrieval evaluation, and a
+small FastAPI-served frontend.
 
 RAG flow:
 
@@ -22,11 +24,13 @@ RAG flow:
 6. Each chunk receives storage metadata, `document_hash`, and `content_hash`.
 7. `app.embeddings` embeds new chunks with `BAAI/bge-m3`.
 8. `app.vector_store` writes external vectors and metadata into Weaviate.
-9. `app.vector_store.similarity_search` retrieves the most relevant chunks.
+9. `app.vector_store.similarity_search` retrieves the most relevant chunks
+   using vector search by default, optional metadata filters, and optional
+   hybrid search when supported by Weaviate.
 10. `app.rag_chain` builds a grounded prompt and calls the configured local
    OpenAI-compatible generator endpoint through LangChain.
-11. `/rag/query` returns the generated answer, sources, and retrieved chunk
-    count.
+11. `/rag/query` returns the generated answer, sources, retrieved chunk count,
+    retrieval mode, and applied filters.
 
 Storage layout:
 
@@ -99,14 +103,18 @@ To upload documents, use the Upload Document panel with a PDF or TXT file and a
 
 To ingest pasted text, use the Ingest Text panel with a filename and `doc_type`.
 
-To ask questions, use the Ask a Question panel. The response shows the answer
-and source chunks with filename, document type, chunk index, page number,
-distance, and text preview.
+To ask questions, use the Ask a Question panel. Set `top_k`, choose `vector` or
+`hybrid`, and optionally enter `doc_type`, `filename`, or `source_id` filters.
+The response shows the answer, retrieval mode, applied filters, and source
+chunks with filename, document type, source ID, chunk index, page number,
+distance or retrieval score, and a contained text preview.
 
 To manage documents, refresh the Documents panel. Cards show whether the
-original file is available and display the stored path when present. Click
-Download to open `/rag/documents/{source_id}/download`, or click Delete to
-remove indexed chunks and any saved original file for that source.
+original file is available and display the stored path when present. Large
+documents show only the first 12 page numbers in the card with a remainder count,
+while the API response still keeps the full `page_numbers` list. Click Download
+to open `/rag/documents/{source_id}/download`, or click Delete to remove indexed
+chunks and any saved original file for that source.
 
 ## Health Check
 
@@ -164,12 +172,44 @@ reported as `chunks_skipped`.
 ```bash
 curl -X POST "http://localhost:8090/rag/query" \
   -H "Content-Type: application/json" \
-  -d '{"question":"What is the refund policy?","top_k":5}'
+  -d '{"question":"What is the refund policy?","top_k":5,"retrieval_mode":"vector"}'
 ```
 
 When the configured local generator server is running, `/rag/query` returns a
 generated answer grounded in the retrieved chunks. The response includes
-`sources` and `retrieved_chunk_count`.
+`sources`, `retrieved_chunk_count`, `retrieval_mode`, and `filters_applied`.
+
+`top_k` controls the maximum number of chunks retrieved before answer
+generation. `retrieval_mode` defaults to `vector`, which embeds the question and
+uses Weaviate vector similarity search. The `hybrid` mode attempts Weaviate
+hybrid search by combining the query text with the query vector. If hybrid
+search is not safely available with the current Weaviate client or collection,
+the API returns HTTP 400 with `Hybrid retrieval is not available in the current
+configuration.`
+
+Optional filters:
+
+```json
+{
+  "question": "What is the refund policy?",
+  "top_k": 3,
+  "retrieval_mode": "vector",
+  "doc_type": "general",
+  "filename": "policy.txt",
+  "source_id": "example-source-id"
+}
+```
+
+Multiple filters use AND semantics and are pushed into the Weaviate retrieval
+query. If filters produce no matching chunks, `/rag/query` returns HTTP 200 with
+the no-information answer, `retrieved_chunk_count: 0`, and `sources: []`; the
+generator is not called.
+
+Source entries preserve filename, document type, source ID, chunk index, page
+number, text, and vector distance. They also include `content_hash`,
+`document_hash`, `stored_file_path`, and `retrieval_score` when available.
+Smaller vector distances are closer matches. Hybrid retrieval scores are
+returned from Weaviate when the client provides them.
 
 If no relevant indexed information is found, `/rag/query` returns HTTP 200 with
 a concise no-information answer and no source chunks.
@@ -222,6 +262,22 @@ curl -I "http://localhost:8090/rag/documents/<SOURCE_ID>/download"
 Older indexed chunks without `stored_file_path` remain compatible. They list
 with `original_file_available: false`, delete still removes their Weaviate
 chunks, and download returns 404 with a clear message.
+
+## Retrieval Evaluation
+
+With the stack running, execute:
+
+```bash
+python3 scripts/evaluate_retrieval.py
+```
+
+The script uses `http://localhost:8090`, ingests small generic text documents,
+accepts duplicate ingest responses, runs vector retrieval tests with `top_k=3`,
+verifies `doc_type` metadata filtering, verifies the no-match filter response,
+and tests hybrid mode when supported. A clear hybrid HTTP 400 is reported as
+unavailable and is acceptable. The script exits non-zero only when required
+vector or filter tests fail, or when hybrid fails in a way other than the
+documented unavailable response.
 
 ## Demo Documents
 

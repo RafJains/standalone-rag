@@ -37,6 +37,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -229,6 +230,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid rgba(90, 111, 126, 0.28);
@@ -244,6 +246,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   border-color: rgba(34, 109, 119, 0.7);
   box-shadow: 0 0 0 3px rgba(34, 109, 119, 0.15);
@@ -332,7 +335,7 @@ textarea:focus {
 
 .query-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 110px auto;
+  grid-template-columns: minmax(220px, 2fr) 110px 150px repeat(3, minmax(150px, 1fr)) auto;
   gap: 12px;
   align-items: end;
 }
@@ -341,8 +344,34 @@ textarea:focus {
   margin: 18px 0;
 }
 
+.query-meta {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.source-item .preview {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.54);
+  white-space: pre-wrap;
+}
+
 .error-text {
   color: var(--danger);
+}
+
+@media (max-width: 1180px) {
+  .query-form {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .question-field {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 860px) {

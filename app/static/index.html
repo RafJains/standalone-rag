@@ -97,10 +97,30 @@
             top_k
             <input id="top-k-input" type="number" min="1" value="3" />
           </label>
+          <label class="mode-field">
+            retrieval_mode
+            <select id="retrieval-mode-input">
+              <option value="vector" selected>vector</option>
+              <option value="hybrid">hybrid</option>
+            </select>
+          </label>
+          <label>
+            doc_type filter
+            <input id="query-doc-type-input" type="text" placeholder="general" />
+          </label>
+          <label>
+            filename filter
+            <input id="query-filename-input" type="text" placeholder="policy.txt" />
+          </label>
+          <label>
+            source_id filter
+            <input id="query-source-id-input" type="text" placeholder="source id" />
+          </label>
           <button type="submit">Ask</button>
         </form>
         <div class="answer-block">
           <h3>Answer</h3>
+          <p id="answer-meta" class="query-meta muted"></p>
           <p id="answer-output" class="message muted">No answer yet.</p>
         </div>
         <div>

@@ -13,9 +13,9 @@ Rohan stack:
 - Workflow: LangChain
 - Generator: local OpenAI-compatible Ministral or Mistral endpoint
 
-Phase 4.5 adds saved original files, duplicate prevention, clean delete,
-download support, and a simple FastAPI-served browser console. The existing
-ingestion, status, and query endpoints remain available.
+Phase 5 adds metadata-filtered retrieval, selectable vector or hybrid retrieval
+mode, richer source metadata, retrieval evaluation, and frontend query controls.
+The existing ingestion, status, document, and query endpoints remain available.
 
 ## Start
 
@@ -49,10 +49,15 @@ origin. It calls:
 
 To upload a document, choose a PDF or TXT file, keep or change the `doc_type`,
 and click Upload. To ingest text, paste text, set a filename and `doc_type`, and
-click Ingest Text. To ask questions, enter a question and `top_k`; answers show
-the retrieved sources. To delete a document, refresh the document list and click
-Delete for the matching `source_id`. Documents with a saved original file also
-show a Download button.
+click Ingest Text. To ask questions, enter a question, set `top_k`, choose
+`retrieval_mode`, and optionally add `doc_type`, `filename`, or `source_id`
+filters. Empty filter fields are not sent. Answers show the retrieval mode,
+applied filters, and retrieved sources. To delete a document, refresh the
+document list and click Delete for the matching `source_id`. Documents with a
+saved original file also show a Download button.
+
+Document cards keep the full page list in the API response, but the frontend
+shows only the first 12 page numbers and a remainder count for large documents.
 
 ## File Storage
 
@@ -112,8 +117,42 @@ curl -X POST "http://localhost:8090/rag/ingest/file" \
 ```bash
 curl -X POST "http://localhost:8090/rag/query" \
   -H "Content-Type: application/json" \
-  -d '{"question":"What is the refund policy?","top_k":5}'
+  -d '{"question":"What is the refund policy?","top_k":5,"retrieval_mode":"vector"}'
 ```
+
+`top_k` controls how many chunks are retrieved before generation. The default
+retrieval mode is `vector`, which embeds the query and uses Weaviate vector
+similarity search. `hybrid` attempts Weaviate hybrid search using the query text
+and query vector. If hybrid search is not available with the current Weaviate
+client or collection configuration, `/rag/query` returns HTTP 400 with:
+
+```text
+Hybrid retrieval is not available in the current configuration.
+```
+
+Optional metadata filters are supported:
+
+```json
+{
+  "question": "What is the refund policy?",
+  "top_k": 3,
+  "retrieval_mode": "vector",
+  "doc_type": "general",
+  "filename": "policy.txt",
+  "source_id": "example-source-id"
+}
+```
+
+When more than one filter is supplied, all filters must match. If no matching
+chunks are retrieved, the API returns HTTP 200 with no sources and does not call
+the generator.
+
+Responses keep `answer`, `sources`, and `retrieved_chunk_count`, and also return
+`retrieval_mode` and `filters_applied`. Source entries include metadata such as
+filename, document type, source ID, chunk index, page number, text, vector
+distance, stored file path, document hash, content hash, and retrieval score
+when Weaviate provides one. Smaller vector distances are closer matches; hybrid
+scores are Weaviate-provided relevance scores.
 
 ## Documents
 
@@ -174,3 +213,16 @@ RAG_GENERATOR_MODEL=Mistral-Small-4-Open
 ```bash
 python scripts/validate_stack.py
 ```
+
+## Retrieval Evaluation
+
+With the stack running on `http://localhost:8090`, run:
+
+```bash
+python3 scripts/evaluate_retrieval.py
+```
+
+The script ingests small generic policy documents, accepts duplicate ingest
+responses, runs vector retrieval tests with `top_k=3`, checks `doc_type`
+filtering, checks the no-match filter response, and tests hybrid mode when
+available. A clear hybrid HTTP 400 is reported as unavailable and is acceptable.
