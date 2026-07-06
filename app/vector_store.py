@@ -22,6 +22,13 @@ COLLECTION_PROPERTIES = [
     Property(name="stored_file_path", data_type=DataType.TEXT),
     Property(name="document_hash", data_type=DataType.TEXT),
     Property(name="content_hash", data_type=DataType.TEXT),
+    Property(name="parser_used", data_type=DataType.TEXT),
+    Property(name="warnings", data_type=DataType.TEXT_ARRAY),
+    Property(name="original_file_size_bytes", data_type=DataType.INT),
+    Property(name="detected_extension", data_type=DataType.TEXT),
+    Property(name="section_title", data_type=DataType.TEXT),
+    Property(name="row_number", data_type=DataType.INT),
+    Property(name="chunk_char_count", data_type=DataType.INT),
 ]
 
 DOCUMENT_RETURN_PROPERTIES = [prop.name for prop in COLLECTION_PROPERTIES]
@@ -211,6 +218,10 @@ def list_documents() -> list[dict[str, Any]]:
                     "stored_file_path": properties.get("stored_file_path"),
                     "original_file_available": False,
                     "document_hash": properties.get("document_hash"),
+                    "parser_used": properties.get("parser_used"),
+                    "warnings": set(properties.get("warnings") or []),
+                    "original_file_size_bytes": properties.get("original_file_size_bytes"),
+                    "detected_extension": properties.get("detected_extension"),
                     "_first_chunk_index": None,
                 },
             )
@@ -225,6 +236,15 @@ def list_documents() -> list[dict[str, Any]]:
                 summary["stored_file_path"] = properties.get("stored_file_path")
             if not summary.get("document_hash") and properties.get("document_hash"):
                 summary["document_hash"] = properties.get("document_hash")
+            if not summary.get("parser_used") and properties.get("parser_used"):
+                summary["parser_used"] = properties.get("parser_used")
+            if not summary.get("original_file_size_bytes") and properties.get("original_file_size_bytes"):
+                summary["original_file_size_bytes"] = properties.get("original_file_size_bytes")
+            if not summary.get("detected_extension") and properties.get("detected_extension"):
+                summary["detected_extension"] = properties.get("detected_extension")
+            for warning in properties.get("warnings") or []:
+                if warning:
+                    summary["warnings"].add(str(warning))
 
             page_number = _int_or_none(properties.get("page_number"))
             if page_number is not None:
@@ -240,6 +260,7 @@ def list_documents() -> list[dict[str, Any]]:
         summaries = []
         for summary in documents_by_source.values():
             summary["page_numbers"] = sorted(summary["page_numbers"])
+            summary["warnings"] = sorted(summary["warnings"])
             summary["original_file_available"] = bool(summary.get("stored_file_path"))
             summary.pop("_first_chunk_index", None)
             summaries.append(summary)
@@ -275,6 +296,10 @@ def get_document_by_hash(document_hash: str) -> dict[str, Any] | None:
             "filename": properties.get("filename"),
             "stored_file_path": properties.get("stored_file_path"),
             "document_hash": document_hash,
+            "parser_used": properties.get("parser_used"),
+            "warnings": properties.get("warnings") or [],
+            "original_file_size_bytes": properties.get("original_file_size_bytes"),
+            "detected_extension": properties.get("detected_extension"),
             "chunk_count": count_documents_by_source_id(str(source_id)),
         }
     except WeaviateBaseError as exc:
@@ -363,6 +388,13 @@ def _document_properties(document: Document) -> dict[str, Any]:
         "stored_file_path": _string_or_none(metadata.get("stored_file_path")),
         "document_hash": _string_or_none(metadata.get("document_hash")),
         "content_hash": _string_or_none(metadata.get("content_hash")),
+        "parser_used": _string_or_none(metadata.get("parser_used")),
+        "warnings": _string_list(metadata.get("warnings")),
+        "original_file_size_bytes": _int_or_none(metadata.get("original_file_size_bytes")),
+        "detected_extension": _string_or_none(metadata.get("detected_extension")),
+        "section_title": _string_or_none(metadata.get("section_title")),
+        "row_number": _int_or_none(metadata.get("row_number")),
+        "chunk_char_count": _int_or_none(metadata.get("chunk_char_count")),
     }
 
 
@@ -379,6 +411,13 @@ def _object_to_document(item: Any) -> Document:
         "stored_file_path": properties.get("stored_file_path"),
         "document_hash": properties.get("document_hash"),
         "content_hash": properties.get("content_hash"),
+        "parser_used": properties.get("parser_used"),
+        "warnings": properties.get("warnings") or [],
+        "original_file_size_bytes": _int_or_none(properties.get("original_file_size_bytes")),
+        "detected_extension": properties.get("detected_extension"),
+        "section_title": properties.get("section_title"),
+        "row_number": _int_or_none(properties.get("row_number")),
+        "chunk_char_count": _int_or_none(properties.get("chunk_char_count")),
     }
     distance = getattr(item_metadata, "distance", None)
     if distance is not None:
@@ -483,6 +522,17 @@ def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _string_list(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None and str(item)]
+    if isinstance(value, tuple | set):
+        return [str(item) for item in value if item is not None and str(item)]
+    text = str(value)
+    return [text] if text else None
 
 
 def _int_or_none(value: Any) -> int | None:

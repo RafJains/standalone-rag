@@ -47,8 +47,9 @@
         <form id="file-form" class="form-stack">
           <label>
             PDF or TXT file
-            <input id="file-input" name="file" type="file" accept=".pdf,.txt,text/plain,application/pdf" required />
+            <input id="file-input" name="file" type="file" accept=".pdf,.txt,.md,.docx,.csv,text/plain,text/markdown,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
           </label>
+          <p id="upload-limits" class="field-hint">Allowed: PDF, TXT, MD, DOCX, CSV.</p>
           <label>
             Document type
             <input id="file-doc-type" name="doc_type" type="text" value="general" />

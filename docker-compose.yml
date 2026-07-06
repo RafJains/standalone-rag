@@ -36,6 +36,7 @@ services:
       WEAVIATE_COLLECTION: "KnowledgeBase"
       RAG_TOP_K: "5"
       RAG_TIMEOUT_SECONDS: "30"
+      RAG_MAX_UPLOAD_MB: "25"
       RAG_GENERATOR_BASE_URL: "http://host.docker.internal:8001/v1"
       RAG_GENERATOR_API_KEY: "not-needed"
       RAG_GENERATOR_MODEL: "Ministral-3-8B-Instruct"

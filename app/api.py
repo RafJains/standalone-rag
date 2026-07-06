@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_rag_settings
-from app.document_loader import load_file_as_documents, load_text_as_documents
+from app.document_loader import ALLOWED_FILE_EXTENSIONS, load_file_as_documents, load_text_as_documents
 from app.rag_chain import GeneratorUnavailableError, generate_answer
 from app.schemas import (
     DeleteDocumentResponse,
@@ -75,6 +75,8 @@ def health() -> dict[str, object]:
         "vector_db": settings.vector_db,
         "weaviate_collection": settings.weaviate_collection,
         "generator_model": settings.rag_generator_model,
+        "max_upload_mb": settings.rag_max_upload_mb,
+        "allowed_upload_extensions": sorted(ALLOWED_FILE_EXTENSIONS),
     }
 
 
@@ -180,6 +182,7 @@ def ingest_text(request: IngestTextRequest) -> IngestResponse:
     source_id = request.source_id or str(uuid4())
     filename = safe_filename(request.filename, "manual-note.txt")
     doc_type = (request.doc_type or "general").strip() or "general"
+    text_size_bytes = len(request.text.encode("utf-8"))
     document_hash = document_hash_from_text(request.text, filename, doc_type)
 
     try:
@@ -206,6 +209,10 @@ def ingest_text(request: IngestTextRequest) -> IngestResponse:
         stored_file_path=stored_file_path,
         original_filename=request.filename or filename,
         document_hash=document_hash,
+        parser_used="plain_text",
+        warnings=[],
+        original_file_size_bytes=text_size_bytes,
+        detected_extension=Path(filename).suffix.lower() or ".txt",
     )
     chunks_indexed, chunks_skipped = _index_documents(documents)
     return IngestResponse(
@@ -214,6 +221,10 @@ def ingest_text(request: IngestTextRequest) -> IngestResponse:
         chunks_skipped=chunks_skipped,
         duplicate=False,
         stored_file_path=stored_file_path,
+        parser_used="plain_text",
+        warnings=[],
+        original_file_size_bytes=text_size_bytes,
+        detected_extension=Path(filename).suffix.lower() or ".txt",
         message=f"Indexed {chunks_indexed} chunk(s) into Weaviate.",
     )
 
@@ -228,6 +239,8 @@ async def ingest_file(
     original_filename = file.filename or "upload"
     filename = safe_filename(original_filename, "upload")
     doc_type = (doc_type or "general").strip() or "general"
+    detected_extension = Path(filename).suffix.lower()
+    _validate_upload_extension(detected_extension)
 
     try:
         content = await file.read()
@@ -236,6 +249,7 @@ async def ingest_file(
 
     if not content:
         raise HTTPException(status_code=400, detail="file cannot be empty")
+    _validate_upload_size(len(content))
 
     document_hash = document_hash_from_bytes(content, doc_type)
     try:
@@ -249,12 +263,13 @@ async def ingest_file(
     stored_file_path = relative_storage_path(stored_path)
 
     try:
-        documents = load_file_as_documents(
+        processing = load_file_as_documents(
             file_path=str(stored_path),
             source_id=resolved_source_id,
             filename=filename,
             doc_type=doc_type,
         )
+        documents = processing.documents
         if not documents:
             raise HTTPException(status_code=400, detail="file did not produce any chunks")
 
@@ -263,6 +278,10 @@ async def ingest_file(
             stored_file_path=stored_file_path,
             original_filename=original_filename,
             document_hash=document_hash,
+            parser_used=processing.parser_used,
+            warnings=processing.warnings,
+            original_file_size_bytes=len(content),
+            detected_extension=processing.detected_extension or detected_extension,
         )
         chunks_indexed, chunks_skipped = _index_documents(documents)
         return IngestResponse(
@@ -271,6 +290,10 @@ async def ingest_file(
             chunks_skipped=chunks_skipped,
             duplicate=False,
             stored_file_path=stored_file_path,
+            parser_used=processing.parser_used,
+            warnings=processing.warnings,
+            original_file_size_bytes=len(content),
+            detected_extension=processing.detected_extension or detected_extension,
             message=f"Indexed {chunks_indexed} chunk(s) from {filename} into Weaviate.",
         )
     except ValueError as exc:
@@ -366,6 +389,9 @@ def _document_to_source_chunk(document) -> SourceChunk:
         document_hash=metadata.get("document_hash"),
         stored_file_path=metadata.get("stored_file_path"),
         retrieval_score=metadata.get("retrieval_score"),
+        section_title=metadata.get("section_title"),
+        row_number=metadata.get("row_number"),
+        chunk_char_count=metadata.get("chunk_char_count"),
     )
 
 
@@ -374,6 +400,10 @@ def _enrich_documents(
     stored_file_path: str,
     original_filename: str,
     document_hash: str,
+    parser_used: str,
+    warnings: list[str],
+    original_file_size_bytes: int,
+    detected_extension: str,
 ) -> None:
     for document in documents:
         metadata = document.metadata
@@ -383,6 +413,11 @@ def _enrich_documents(
         metadata["stored_file_path"] = stored_file_path
         metadata["original_filename"] = original_filename
         metadata["document_hash"] = document_hash
+        metadata["parser_used"] = metadata.get("parser_used") or parser_used
+        metadata["warnings"] = warnings
+        metadata["original_file_size_bytes"] = original_file_size_bytes
+        metadata["detected_extension"] = detected_extension
+        metadata["chunk_char_count"] = metadata.get("chunk_char_count") or len(document.page_content)
         metadata["content_hash"] = content_hash_from_text(
             document.page_content,
             str(filename),
@@ -400,6 +435,10 @@ def _duplicate_ingest_response(existing: dict) -> IngestResponse:
         chunks_skipped=int(skipped),
         duplicate=True,
         stored_file_path=existing.get("stored_file_path"),
+        parser_used=existing.get("parser_used"),
+        warnings=existing.get("warnings") or [],
+        original_file_size_bytes=existing.get("original_file_size_bytes"),
+        detected_extension=existing.get("detected_extension"),
         message=(
             "Document already exists in Weaviate; no duplicate file was saved "
             f"and no duplicate chunks were indexed. Existing source_id: {source_id}."
@@ -412,3 +451,22 @@ def _with_file_availability(summary: dict) -> dict:
     path = resolve_stored_path(stored_file_path)
     summary["original_file_available"] = bool(path and path.exists() and path.is_file())
     return summary
+
+
+def _validate_upload_extension(extension: str) -> None:
+    if extension not in ALLOWED_FILE_EXTENSIONS:
+        supported = ", ".join(sorted(ALLOWED_FILE_EXTENSIONS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{extension or 'unknown'}'. Supported formats: {supported}.",
+        )
+
+
+def _validate_upload_size(size_bytes: int) -> None:
+    settings = get_rag_settings()
+    max_bytes = settings.rag_max_upload_mb * 1024 * 1024
+    if size_bytes > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File is too large. Maximum upload size is {settings.rag_max_upload_mb} MB.",
+        )

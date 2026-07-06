@@ -15,6 +15,9 @@ class SourceChunk(BaseModel):
     document_hash: str | None = None
     stored_file_path: str | None = None
     retrieval_score: float | None = None
+    section_title: str | None = None
+    row_number: int | None = None
+    chunk_char_count: int | None = None
 
 
 class IngestTextRequest(BaseModel):
@@ -30,6 +33,10 @@ class IngestResponse(BaseModel):
     chunks_skipped: int = 0
     duplicate: bool = False
     stored_file_path: str | None = None
+    parser_used: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    original_file_size_bytes: int | None = None
+    detected_extension: str | None = None
     message: str
 
 
@@ -61,6 +68,10 @@ class DocumentSummary(BaseModel):
     stored_file_path: str | None = None
     original_file_available: bool = False
     document_hash: str | None = None
+    parser_used: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    original_file_size_bytes: int | None = None
+    detected_extension: str | None = None
 
 
 class DocumentListResponse(BaseModel):

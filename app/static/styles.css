@@ -221,6 +221,12 @@ dd {
   gap: 12px;
 }
 
+.field-hint {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 label {
   display: grid;
   gap: 6px;

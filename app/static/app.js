@@ -11,6 +11,7 @@ const elements = {
   collectionName: document.querySelector("#collection-name"),
   generatorModel: document.querySelector("#generator-model"),
   statusMessage: document.querySelector("#status-message"),
+  uploadLimits: document.querySelector("#upload-limits"),
   fileForm: document.querySelector("#file-form"),
   fileInput: document.querySelector("#file-input"),
   fileDocType: document.querySelector("#file-doc-type"),
@@ -84,6 +85,7 @@ async function refreshStatus() {
       status.weaviate_collection || health.weaviate_collection || "-";
     elements.generatorModel.textContent = health.generator_model || "-";
     elements.statusMessage.textContent = status.message || "";
+    renderUploadLimits(health);
 
     elements.statusBadge.textContent = status.weaviate_reachable ? "Ready" : "Degraded";
     elements.statusBadge.className = status.weaviate_reachable ? "badge ok" : "badge warn";
@@ -96,6 +98,15 @@ async function refreshStatus() {
     elements.statusBadge.textContent = "Offline";
     elements.statusBadge.className = "badge error";
   }
+}
+
+function renderUploadLimits(health) {
+  if (!elements.uploadLimits) {
+    return;
+  }
+  const extensions = health.allowed_upload_extensions || [".pdf", ".txt", ".md", ".docx", ".csv"];
+  const maxUploadMb = health.max_upload_mb || 25;
+  elements.uploadLimits.textContent = `Allowed: ${extensions.join(", ")}. Max upload: ${maxUploadMb} MB.`;
 }
 
 async function refreshDocuments() {
@@ -142,6 +153,19 @@ function renderDocument(documentSummary) {
   }
   if (documentSummary.document_hash) {
     meta.append(metaSpan(`document_hash: ${documentSummary.document_hash}`));
+  }
+  if (documentSummary.parser_used) {
+    meta.append(metaSpan(`parser: ${documentSummary.parser_used}`));
+  }
+  if (documentSummary.detected_extension) {
+    meta.append(metaSpan(`ext: ${documentSummary.detected_extension}`));
+  }
+  if (documentSummary.original_file_size_bytes !== null && documentSummary.original_file_size_bytes !== undefined) {
+    meta.append(metaSpan(`size: ${formatBytes(documentSummary.original_file_size_bytes)}`));
+  }
+  const warnings = documentSummary.warnings || [];
+  if (warnings.length) {
+    meta.append(metaSpan(`warnings: ${warnings.length}`));
   }
 
   body.append(title, meta);
@@ -361,6 +385,15 @@ function renderSource(source) {
     metaSpan(`page: ${source.page_number ?? "unknown"}`),
     metaSpan(formatSourceScore(source)),
   );
+  if (source.section_title) {
+    meta.append(metaSpan(`section: ${source.section_title}`));
+  }
+  if (source.row_number !== null && source.row_number !== undefined) {
+    meta.append(metaSpan(`row: ${source.row_number}`));
+  }
+  if (source.chunk_char_count !== null && source.chunk_char_count !== undefined) {
+    meta.append(metaSpan(`chars: ${source.chunk_char_count}`));
+  }
 
   const preview = document.createElement("p");
   preview.className = "preview";
@@ -389,6 +422,21 @@ function formatDistance(distance) {
     return "unknown";
   }
   return Number(distance).toFixed(4);
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value)) {
+    return "unknown";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kb = value / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 function setFormBusy(form, busy) {

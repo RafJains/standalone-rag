@@ -13,9 +13,9 @@ Rohan stack:
 - Workflow: LangChain
 - Generator: local OpenAI-compatible Ministral or Mistral endpoint
 
-Phase 5 adds metadata-filtered retrieval, selectable vector or hybrid retrieval
-mode, richer source metadata, retrieval evaluation, and frontend query controls.
-The existing ingestion, status, document, and query endpoints remain available.
+Phase 6 adds broader document processing, upload validation, parser diagnostics,
+and processing evaluation. The existing ingestion, status, document, retrieval,
+and query endpoints remain available.
 
 ## Start
 
@@ -47,9 +47,13 @@ origin. It calls:
 - `DELETE /rag/documents/{source_id}` to delete all chunks for a document
 - `POST /rag/query` for question answering
 
-To upload a document, choose a PDF or TXT file, keep or change the `doc_type`,
-and click Upload. To ingest text, paste text, set a filename and `doc_type`, and
-click Ingest Text. To ask questions, enter a question, set `top_k`, choose
+To upload a document, choose a supported file, keep or change the `doc_type`,
+and click Upload. Supported extensions are `.pdf`, `.txt`, `.md`, `.docx`, and
+`.csv`; the default maximum upload size is 25 MB. To ingest text, paste text,
+set a filename and `doc_type`, and click Ingest Text. Upload and text-ingest
+responses include parser diagnostics such as `parser_used`, `warnings`,
+`original_file_size_bytes`, and `detected_extension`. To ask questions, enter a
+question, set `top_k`, choose
 `retrieval_mode`, and optionally add `doc_type`, `filename`, or `source_id`
 filters. Empty filter fields are not sent. Answers show the retrieval mode,
 applied filters, and retrieved sources. To delete a document, refresh the
@@ -72,7 +76,9 @@ on disk in `data/uploads`; parsed chunks, embeddings, and metadata live in the
 generic Weaviate `KnowledgeBase` collection. Each new chunk includes metadata
 such as `source_id`, `filename`, `original_filename`, `stored_file_path`,
 `doc_type`, `chunk_index`, optional `page_number`, `document_hash`, and
-`content_hash`.
+`content_hash`. Phase 6 also stores processing metadata such as `parser_used`,
+`detected_extension`, `original_file_size_bytes`, `warnings`, `section_title`,
+CSV `row_number`, and `chunk_char_count` when available.
 
 `data/demo_documents` is reserved for local sample material. Move any sample PDF
 or TXT files there manually, then upload them through the UI or API when you want
@@ -110,6 +116,33 @@ The response includes `source_id`, `chunks_indexed`, `chunks_skipped`,
 curl -X POST "http://localhost:8090/rag/ingest/file" \
   -F "file=@/path/to/sample-document.pdf" \
   -F "doc_type=general"
+```
+
+Allowed upload extensions are `.pdf`, `.txt`, `.md`, `.docx`, and `.csv`.
+`RAG_MAX_UPLOAD_MB` controls the maximum accepted file size and defaults to
+`25`. Empty files, unsupported extensions, and oversized files return clear HTTP
+errors before indexing.
+
+Parser behavior:
+
+- PDF: parsed through Docling first, with the existing PDF text fallback.
+- TXT: safely decoded as plain text.
+- MD: decoded as text and Markdown headings are preserved as section metadata.
+- DOCX: parsed as document text without requiring a separate service.
+- CSV: parsed into readable row text; empty rows are skipped with a warning.
+
+OCR is not implemented in Phase 6. Scanned image PDFs remain future work unless
+text extraction is already available through the current parser path.
+
+Ingestion responses include:
+
+```json
+{
+  "parser_used": "csv",
+  "warnings": ["CSV contained empty rows that were skipped."],
+  "original_file_size_bytes": 128,
+  "detected_extension": ".csv"
+}
 ```
 
 ## Query
@@ -226,3 +259,15 @@ The script ingests small generic policy documents, accepts duplicate ingest
 responses, runs vector retrieval tests with `top_k=3`, checks `doc_type`
 filtering, checks the no-match filter response, and tests hybrid mode when
 available. A clear hybrid HTTP 400 is reported as unavailable and is acceptable.
+
+## Processing Evaluation
+
+With the stack running on `http://localhost:8090`, run:
+
+```bash
+python3 scripts/evaluate_processing.py
+```
+
+The script creates temporary TXT, MD, CSV, and DOCX samples, uploads them through
+`/rag/ingest/file`, verifies processing diagnostics, accepts duplicate uploads,
+and runs a hybrid query with a filename filter.

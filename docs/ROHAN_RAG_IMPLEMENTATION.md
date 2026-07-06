@@ -6,10 +6,11 @@ This RAG service is a separate project under `RAG/`. It is not wired into the
 any external application codebase, prompts, tools, Dockerfile, requirements,
 compose file, or environment file.
 
-Phase 5 keeps the RAG flow and adds saved originals, duplicate prevention,
+Phase 6 keeps the RAG flow and adds saved originals, duplicate prevention,
 download support, clean delete, metadata-filtered retrieval, selectable vector
-or hybrid retrieval mode, richer source metadata, retrieval evaluation, and a
-small FastAPI-served frontend.
+or hybrid retrieval mode, richer source metadata, document processing upgrades,
+upload validation, processing diagnostics, retrieval evaluation, and a small
+FastAPI-served frontend.
 
 RAG flow:
 
@@ -18,10 +19,12 @@ RAG flow:
    for an existing document before saving a new copy.
 3. Original uploads and pasted text are saved under
    `data/uploads/<source_id>/<safe_filename>`.
-4. `app.document_loader` parses documents with Docling when possible.
+4. `app.document_loader` validates and parses supported documents: PDF, TXT,
+   Markdown, DOCX, and CSV.
 5. Docling `HybridChunker` is used when available. A conservative text chunking
    fallback is used for `.txt`, PDFs via `pypdf`, and Docling API differences.
-6. Each chunk receives storage metadata, `document_hash`, and `content_hash`.
+6. Each chunk receives storage metadata, parser metadata, `document_hash`, and
+   `content_hash`.
 7. `app.embeddings` embeds new chunks with `BAAI/bge-m3`.
 8. `app.vector_store` writes external vectors and metadata into Weaviate.
 9. `app.vector_store.similarity_search` retrieves the most relevant chunks
@@ -98,8 +101,9 @@ The console has panels for service status, file upload, text ingestion, indexed
 documents, and question answering. It is vanilla HTML, CSS, and JavaScript in
 `app/static`.
 
-To upload documents, use the Upload Document panel with a PDF or TXT file and a
-`doc_type` such as `general`.
+To upload documents, use the Upload Document panel with a supported file and a
+`doc_type` such as `general`. Supported extensions are `.pdf`, `.txt`, `.md`,
+`.docx`, and `.csv`. The panel displays the configured maximum upload size.
 
 To ingest pasted text, use the Ingest Text panel with a filename and `doc_type`.
 
@@ -110,11 +114,12 @@ chunks with filename, document type, source ID, chunk index, page number,
 distance or retrieval score, and a contained text preview.
 
 To manage documents, refresh the Documents panel. Cards show whether the
-original file is available and display the stored path when present. Large
-documents show only the first 12 page numbers in the card with a remainder count,
-while the API response still keeps the full `page_numbers` list. Click Download
-to open `/rag/documents/{source_id}/download`, or click Delete to remove indexed
-chunks and any saved original file for that source.
+original file is available, parser used, detected extension, original size,
+warning count, and stored path when present. Large documents show only the first
+12 page numbers in the card with a remainder count, while the API response still
+keeps the full `page_numbers` list. Click Download to open
+`/rag/documents/{source_id}/download`, or click Delete to remove indexed chunks
+and any saved original file for that source.
 
 ## Health Check
 
@@ -152,8 +157,41 @@ curl -X POST "http://localhost:8090/rag/ingest/file" \
   -F "doc_type=general"
 ```
 
-File uploads are saved under `data/uploads/<source_id>/` using a sanitized
+File uploads are validated before saving. Allowed extensions are `.pdf`, `.txt`,
+`.md`, `.docx`, and `.csv`. `RAG_MAX_UPLOAD_MB` controls maximum upload size and
+defaults to `25`. Empty files, unsupported extensions, and oversized files return
+clear HTTP errors.
+
+Valid uploads are saved under `data/uploads/<source_id>/` using a sanitized
 filename, then parsed from that saved path.
+
+Parser behavior:
+
+- PDF uses Docling first and keeps the existing PDF text fallback.
+- TXT uses safe text decoding.
+- Markdown uses safe text decoding and preserves headings as `section_title`
+  metadata when possible.
+- DOCX is parsed as text without adding any external service.
+- CSV is converted into readable row text. Empty rows are skipped and reported in
+  `warnings`.
+
+OCR is not implemented in Phase 6. Scanned image PDFs are future work unless the
+current parser path can already extract text.
+
+Ingestion responses keep the existing fields and add processing diagnostics:
+
+```json
+{
+  "parser_used": "markdown_text",
+  "warnings": [],
+  "original_file_size_bytes": 2048,
+  "detected_extension": ".md"
+}
+```
+
+Chunks may include `section_title`, CSV `row_number`, `page_number`, and
+`chunk_char_count`. Existing Weaviate collections are updated safely with these
+additional generic metadata properties.
 
 ## Duplicate Prevention
 
@@ -278,6 +316,19 @@ and tests hybrid mode when supported. A clear hybrid HTTP 400 is reported as
 unavailable and is acceptable. The script exits non-zero only when required
 vector or filter tests fail, or when hybrid fails in a way other than the
 documented unavailable response.
+
+## Processing Evaluation
+
+With the stack running, execute:
+
+```bash
+python3 scripts/evaluate_processing.py
+```
+
+The script uses `http://localhost:8090`, creates temporary TXT, MD, CSV, and
+DOCX samples, uploads them through `/rag/ingest/file`, verifies that processing
+diagnostics are present, accepts duplicate upload responses, and runs a hybrid
+query with a filename filter.
 
 ## Demo Documents
 
