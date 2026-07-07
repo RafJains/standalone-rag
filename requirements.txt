@@ -6,11 +6,7 @@ uvicorn
 pydantic
 pydantic-settings
 python-dotenv
-httpx
 docling
-langchain-core>=0.3,<0.4
-langchain-huggingface>=0.1,<0.2
-langchain-openai>=0.3,<0.4
 langgraph
 weaviate-client
 sentence-transformers

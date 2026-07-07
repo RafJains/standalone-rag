@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+import json
+import urllib.error
+import urllib.request
 
 from app.config import RagSettings, get_rag_settings
+from app.rag_types import RagDocument
 
 
 class GeneratorUnavailableError(RuntimeError):
@@ -22,42 +23,56 @@ HUMAN_PROMPT_TEMPLATE = "Question:\n{question}\n\nContext:\n{context}\n\nAnswer:
 
 def generate_answer(
     question: str,
-    documents: list[Document],
+    documents: list[RagDocument],
     settings: RagSettings | None = None,
 ) -> str:
     active_settings = settings or get_rag_settings()
-    context = format_context_blocks(documents)
-    llm = ChatOpenAI(
-        base_url=active_settings.rag_generator_base_url,
-        api_key=active_settings.rag_generator_api_key,
-        model=active_settings.rag_generator_model,
-        temperature=active_settings.rag_generator_temperature,
-        max_tokens=active_settings.rag_generator_max_tokens,
-        timeout=active_settings.rag_generator_timeout_seconds,
+    payload = {
+        "model": active_settings.rag_generator_model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": HUMAN_PROMPT_TEMPLATE.format(
+                    question=question,
+                    context=format_context_blocks(documents),
+                ),
+            },
+        ],
+        "temperature": active_settings.rag_generator_temperature,
+        "max_tokens": active_settings.rag_generator_max_tokens,
+    }
+    request = urllib.request.Request(
+        _chat_completions_url(active_settings.rag_generator_base_url),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {active_settings.rag_generator_api_key}",
+        },
+        method="POST",
     )
 
     try:
-        response = llm.invoke(
-            [
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(
-                    content=HUMAN_PROMPT_TEMPLATE.format(
-                        question=question,
-                        context=context,
-                    )
-                ),
-            ]
-        )
-    except Exception as exc:
+        with urllib.request.urlopen(
+            request,
+            timeout=active_settings.rag_generator_timeout_seconds,
+        ) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
         raise GeneratorUnavailableError(
             "Local generator LLM is unavailable. Confirm the configured "
             "OpenAI-compatible endpoint is running and reachable."
         ) from exc
 
-    return _message_content_to_text(response.content).strip()
+    try:
+        return str(body["choices"][0]["message"]["content"]).strip()
+    except (KeyError, IndexError, TypeError) as exc:
+        raise GeneratorUnavailableError(
+            "Local generator LLM returned an unexpected response shape."
+        ) from exc
 
 
-def format_context_blocks(documents: list[Document]) -> str:
+def format_context_blocks(documents: list[RagDocument]) -> str:
     blocks = []
     for index, document in enumerate(documents, start=1):
         metadata = document.metadata
@@ -77,21 +92,11 @@ def format_context_blocks(documents: list[Document]) -> str:
     return "\n\n".join(blocks)
 
 
+def _chat_completions_url(base_url: str) -> str:
+    return base_url.rstrip("/") + "/chat/completions"
+
+
 def _metadata_value(value: object) -> str:
     if value is None or value == "":
         return "unknown"
     return str(value)
-
-
-def _message_content_to_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict):
-                parts.append(str(item.get("text") or ""))
-            else:
-                parts.append(str(item))
-        return "".join(parts)
-    return str(content)

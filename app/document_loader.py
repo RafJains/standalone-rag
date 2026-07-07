@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
-from langchain_core.documents import Document
 from pypdf import PdfReader
+
+from app.rag_types import RagDocument
 
 
 FALLBACK_CHUNK_SIZE = 1000
@@ -17,7 +18,7 @@ ALLOWED_FILE_EXTENSIONS = {".pdf", ".txt", ".md", ".docx", ".csv"}
 
 @dataclass
 class ProcessingResult:
-    documents: list[Document]
+    documents: list[RagDocument]
     parser_used: str
     warnings: list[str] = field(default_factory=list)
     detected_extension: str | None = None
@@ -28,7 +29,7 @@ def load_text_as_documents(
     source_id: str,
     filename: str | None,
     doc_type: str,
-) -> list[Document]:
+) -> list[RagDocument]:
     documents = _documents_from_text(
         text=text,
         source_id=source_id,
@@ -107,7 +108,7 @@ def _load_with_docling(
     source_id: str,
     filename: str,
     doc_type: str,
-) -> list[Document]:
+) -> list[RagDocument]:
     from docling.document_converter import DocumentConverter
 
     converter = DocumentConverter()
@@ -118,7 +119,7 @@ def _load_with_docling(
 
     chunks = _chunk_docling_document(docling_document)
     if chunks:
-        documents: list[Document] = []
+        documents: list[RagDocument] = []
         for index, chunk in enumerate(chunks):
             text = _extract_chunk_text(chunk)
             if not text:
@@ -129,7 +130,7 @@ def _load_with_docling(
             page_number = _extract_page_number(chunk)
             if page_number is not None:
                 metadata["page_number"] = page_number
-            documents.append(Document(page_content=text, metadata=metadata))
+            documents.append(RagDocument(page_content=text, metadata=metadata))
         if documents:
             return documents
 
@@ -200,9 +201,9 @@ def _load_pdf_fallback(
     source_id: str,
     filename: str,
     doc_type: str,
-) -> list[Document]:
+) -> list[RagDocument]:
     reader = PdfReader(str(path))
-    documents: list[Document] = []
+    documents: list[RagDocument] = []
     chunk_index = 0
     for page_index, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
@@ -211,7 +212,7 @@ def _load_pdf_fallback(
             metadata["page_number"] = page_index
             metadata["parser_used"] = "pypdf"
             metadata["chunk_char_count"] = len(chunk)
-            documents.append(Document(page_content=chunk, metadata=metadata))
+            documents.append(RagDocument(page_content=chunk, metadata=metadata))
             chunk_index += 1
     if not documents:
         raise ValueError("No text could be extracted from the PDF.")
@@ -226,8 +227,8 @@ def _documents_from_text(
     page_number: int | None,
     parser_used: str,
     section_title: str | None = None,
-) -> list[Document]:
-    documents: list[Document] = []
+) -> list[RagDocument]:
+    documents: list[RagDocument] = []
     for index, chunk in enumerate(_split_text(text)):
         metadata = _base_metadata(source_id, filename, doc_type, index)
         if page_number is not None:
@@ -236,7 +237,7 @@ def _documents_from_text(
         metadata["chunk_char_count"] = len(chunk)
         if section_title:
             metadata["section_title"] = section_title
-        documents.append(Document(page_content=chunk, metadata=metadata))
+        documents.append(RagDocument(page_content=chunk, metadata=metadata))
     return documents
 
 
@@ -245,8 +246,8 @@ def _documents_from_markdown(
     source_id: str,
     filename: str,
     doc_type: str,
-) -> list[Document]:
-    documents: list[Document] = []
+) -> list[RagDocument]:
+    documents: list[RagDocument] = []
     current_section = None
     chunk_index = 0
     for section_title, section_text in _markdown_sections(text):
@@ -305,9 +306,9 @@ def _load_csv(
     source_id: str,
     filename: str,
     doc_type: str,
-) -> tuple[list[Document], list[str]]:
+) -> tuple[list[RagDocument], list[str]]:
     warnings: list[str] = []
-    documents: list[Document] = []
+    documents: list[RagDocument] = []
     chunk_index = 0
     skipped_empty_rows = 0
 
@@ -333,7 +334,7 @@ def _load_csv(
             metadata["row_number"] = row_number
             metadata["section_title"] = "CSV rows"
             metadata["chunk_char_count"] = len(chunk)
-            documents.append(Document(page_content=chunk, metadata=metadata))
+            documents.append(RagDocument(page_content=chunk, metadata=metadata))
             chunk_index += 1
 
     if skipped_empty_rows:
@@ -356,7 +357,7 @@ def _load_docx(
     source_id: str,
     filename: str,
     doc_type: str,
-) -> list[Document]:
+) -> list[RagDocument]:
     try:
         text = _read_docx_with_python_docx(path)
     except Exception:
@@ -395,7 +396,7 @@ def _read_docx_with_stdlib(path: Path) -> str:
     return "\n\n".join(paragraphs)
 
 
-def _pdf_warnings(documents: list[Document]) -> list[str]:
+def _pdf_warnings(documents: list[RagDocument]) -> list[str]:
     if not any(document.metadata.get("page_number") is not None for document in documents):
         return ["No page metadata found."]
     return []

@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_rag_settings
 from app.document_loader import ALLOWED_FILE_EXTENSIONS, load_file_as_documents, load_text_as_documents
-from app.rag_chain import GeneratorUnavailableError
+from app.generator import GeneratorUnavailableError
 from app.rag_graph import run_rag_graph
 from app.schemas import (
     DeleteDocumentResponse,

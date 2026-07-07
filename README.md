@@ -15,13 +15,15 @@ Rohan stack:
 
 Phase 6 adds broader document processing, upload validation, parser diagnostics,
 and processing evaluation. Phase 6.5 uses LangGraph for RAG workflow
-orchestration. The existing ingestion, status, document, retrieval, and query
-endpoints remain available.
+orchestration. Phase 7 removes the retired chain framework from project code and
+dependencies while preserving the existing ingestion, status, document,
+retrieval, query, and frontend behavior. Production Backend Hardening is now
+Phase 8.
 
 The query workflow is a LangGraph graph with `retrieve`, `decide`, `generate`,
 and `fallback` nodes. Retrieval remains in Weaviate, embeddings remain
-`BAAI/bge-m3`, and generation still uses the configured local OpenAI-compatible
-Ministral endpoint.
+`BAAI/bge-m3`, and generation uses a direct OpenAI-compatible call to the
+configured local Ministral endpoint.
 
 ## Start
 
@@ -82,7 +84,7 @@ on disk in `data/uploads`; parsed chunks, embeddings, and metadata live in the
 generic Weaviate `KnowledgeBase` collection. Each new chunk includes metadata
 such as `source_id`, `filename`, `original_filename`, `stored_file_path`,
 `doc_type`, `chunk_index`, optional `page_number`, `document_hash`, and
-`content_hash`. Phase 6 also stores processing metadata such as `parser_used`,
+`content_hash`. The stack also stores processing metadata such as `parser_used`,
 `detected_extension`, `original_file_size_bytes`, `warnings`, `section_title`,
 CSV `row_number`, and `chunk_char_count` when available.
 
@@ -137,7 +139,7 @@ Parser behavior:
 - DOCX: parsed as document text without requiring a separate service.
 - CSV: parsed into readable row text; empty rows are skipped with a warning.
 
-OCR is not implemented in Phase 6. Scanned image PDFs remain future work unless
+OCR is not implemented yet. Scanned image PDFs remain future work unless
 text extraction is already available through the current parser path.
 
 Ingestion responses include:

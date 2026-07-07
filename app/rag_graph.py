@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from langchain_core.documents import Document
 from langgraph.graph import END, StateGraph
 
 from app.config import RagSettings, get_rag_settings
-from app.rag_chain import generate_answer
+from app.generator import generate_answer
+from app.rag_types import RagDocument
 from app.schemas import SourceChunk
 from app.vector_store import similarity_search
 
@@ -19,7 +19,7 @@ class RagGraphState(TypedDict, total=False):
     top_k: int
     retrieval_mode: Literal["vector", "hybrid"]
     filters: dict[str, str]
-    documents: list[Document]
+    documents: list[RagDocument]
     sources: list[SourceChunk]
     answer: str
     retrieved_chunk_count: int
@@ -124,7 +124,7 @@ def _get_graph():
     return _COMPILED_RAG_GRAPH
 
 
-def _document_to_source_chunk(document: Document) -> SourceChunk:
+def _document_to_source_chunk(document: RagDocument) -> SourceChunk:
     metadata: dict[str, Any] = document.metadata
     return SourceChunk(
         source_id=metadata.get("source_id"),

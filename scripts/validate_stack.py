@@ -7,10 +7,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN = (
+    "lang" + "chain",
     "live" + "kit",
     "ho" + "tel",
+    "grand" + "view",
+    "gu" + "est",
+    "ro" + "om",
+    "book" + "ing",
+    "check" + "out",
+    "check" + "-in",
     "gem" + "ini",
     "deep" + "gram",
+    "token" + "-server",
+    "agent" + "_server",
+    "ho" + "tel" + "_policy",
+    "ho" + "tel" + "knowledge",
     "qd" + "rant",
     "mil" + "vus",
     "qw" + "en",
@@ -20,13 +31,20 @@ ALLOWED_MODEL_TERM_PATTERNS = (
     re.compile(r"\b" + "ll" + "ama" + r"\b.*\bforbidden\b", re.IGNORECASE),
     re.compile(r"\bforbidden\b.*\b" + "ll" + "ama" + r"\b", re.IGNORECASE),
 )
-SKIP_DIRS = {"__pycache__", ".venv", "venv", ".git"}
+SKIP_DIRS = {"__pycache__", ".pytest_cache", ".venv", "venv", ".git"}
+SKIP_PATHS = {
+    ("data", "uploads"),
+    ("data", "demo_documents"),
+}
 
 
 def iter_files() -> list[Path]:
     files: list[Path] = []
     for path in ROOT.rglob("*"):
         if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        rel_parts = path.relative_to(ROOT).parts
+        if any(rel_parts[: len(skip_path)] == skip_path for skip_path in SKIP_PATHS):
             continue
         if path.is_file():
             files.append(path)

@@ -2,13 +2,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 import weaviate
-from langchain_core.documents import Document
 from weaviate.classes.config import Configure, DataType, Property
 from weaviate.classes.query import Filter, MetadataQuery
 from weaviate.exceptions import WeaviateBaseError
 
 from app.config import get_rag_settings
 from app.embeddings import get_embeddings
+from app.rag_types import RagDocument
 
 
 COLLECTION_PROPERTIES = [
@@ -84,7 +84,7 @@ def ensure_collection(client: weaviate.WeaviateClient | None = None) -> None:
             active_client.close()
 
 
-def add_documents(documents: list[Document]) -> tuple[int, int]:
+def add_documents(documents: list[RagDocument]) -> tuple[int, int]:
     non_empty_documents = [doc for doc in documents if doc.page_content.strip()]
     if not non_empty_documents:
         return 0, len(documents)
@@ -126,7 +126,7 @@ def similarity_search(
     top_k: int,
     filters: dict[str, str] | None = None,
     retrieval_mode: str = "vector",
-) -> list[Document]:
+) -> list[RagDocument]:
     if retrieval_mode == "hybrid":
         return hybrid_search(query=query, top_k=top_k, filters=filters)
     if retrieval_mode != "vector":
@@ -157,7 +157,7 @@ def hybrid_search(
     query: str,
     top_k: int,
     filters: dict[str, str] | None = None,
-) -> list[Document]:
+) -> list[RagDocument]:
     embeddings = get_embeddings()
     query_vector = embeddings.embed_query(query)
 
@@ -375,7 +375,7 @@ def check_weaviate_ready() -> tuple[bool, str]:
         client.close()
 
 
-def _document_properties(document: Document) -> dict[str, Any]:
+def _document_properties(document: RagDocument) -> dict[str, Any]:
     metadata = document.metadata
     return {
         "text": document.page_content,
@@ -398,7 +398,7 @@ def _document_properties(document: Document) -> dict[str, Any]:
     }
 
 
-def _object_to_document(item: Any) -> Document:
+def _object_to_document(item: Any) -> RagDocument:
     properties = item.properties or {}
     item_metadata = getattr(item, "metadata", None)
     metadata = {
@@ -425,7 +425,7 @@ def _object_to_document(item: Any) -> Document:
     retrieval_score = _float_or_none(getattr(item_metadata, "score", None))
     if retrieval_score is not None:
         metadata["retrieval_score"] = retrieval_score
-    return Document(page_content=properties.get("text") or "", metadata=metadata)
+    return RagDocument(page_content=properties.get("text") or "", metadata=metadata)
 
 
 def _build_filters(filters: dict[str, str] | None) -> Filter | None:

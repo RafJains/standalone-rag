@@ -11,7 +11,11 @@ download support, clean delete, metadata-filtered retrieval, selectable vector
 or hybrid retrieval mode, richer source metadata, document processing upgrades,
 upload validation, processing diagnostics, retrieval evaluation, and a small
 FastAPI-served frontend. Phase 6.5 migrates query orchestration to LangGraph
-while preserving the existing API and frontend behavior.
+while preserving the existing API and frontend behavior. Phase 7 removes the
+retired chain framework from project code and dependencies, keeps LangGraph as
+the workflow layer, keeps Weaviate retrieval, keeps `BAAI/bge-m3` embeddings,
+and keeps the local OpenAI-compatible Ministral generator endpoint. Production
+Backend Hardening is now Phase 8.
 
 RAG flow:
 
@@ -33,8 +37,8 @@ RAG flow:
    hybrid search when supported by Weaviate.
 10. `app.rag_graph` runs a LangGraph workflow with `retrieve`, `decide`,
     `generate`, and `fallback` nodes.
-11. `app.rag_chain` keeps the grounded prompt and calls the configured local
-    OpenAI-compatible generator endpoint.
+11. `app.generator` keeps the grounded prompt and calls the configured local
+    OpenAI-compatible generator endpoint directly.
 12. `/rag/query` returns the generated answer, sources, retrieved chunk count,
     retrieval mode, and applied filters.
 
@@ -81,7 +85,7 @@ Frontend flow:
 - Vector search: Weaviate
 - Workflow: LangGraph
 - Initial generator: Ministral 3 8B or 14B
-- Production generator: Mistral Small 4 Open through vLLM
+- Later generator option: Mistral Small 4 Open through vLLM
 
 ## Startup
 
@@ -178,7 +182,7 @@ Parser behavior:
 - CSV is converted into readable row text. Empty rows are skipped and reported in
   `warnings`.
 
-OCR is not implemented in Phase 6. Scanned image PDFs are future work unless the
+OCR is not implemented yet. Scanned image PDFs are future work unless the
 current parser path can already extract text.
 
 Ingestion responses keep the existing fields and add processing diagnostics:
