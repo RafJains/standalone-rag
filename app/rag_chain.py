@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from langchain_core.documents import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.config import RagSettings, get_rag_settings
@@ -12,21 +11,13 @@ class GeneratorUnavailableError(RuntimeError):
     """Raised when the configured local generator endpoint cannot answer."""
 
 
-RAG_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "You are a concise retrieval-augmented answering assistant. "
-            "Answer only from the provided context. Do not invent facts. "
-            "If the answer is missing from the context, say you do not know. "
-            "Keep the answer concise.",
-        ),
-        (
-            "human",
-            "Question:\n{question}\n\nContext:\n{context}\n\nAnswer:",
-        ),
-    ]
+SYSTEM_PROMPT = (
+    "You are a concise retrieval-augmented answering assistant. "
+    "Answer only from the provided context. Do not invent facts. "
+    "If the answer is missing from the context, say you do not know. "
+    "Keep the answer concise."
 )
+HUMAN_PROMPT_TEMPLATE = "Question:\n{question}\n\nContext:\n{context}\n\nAnswer:"
 
 
 def generate_answer(
@@ -44,17 +35,26 @@ def generate_answer(
         max_tokens=active_settings.rag_generator_max_tokens,
         timeout=active_settings.rag_generator_timeout_seconds,
     )
-    chain = RAG_PROMPT | llm | StrOutputParser()
 
     try:
-        answer = chain.invoke({"question": question, "context": context})
+        response = llm.invoke(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(
+                    content=HUMAN_PROMPT_TEMPLATE.format(
+                        question=question,
+                        context=context,
+                    )
+                ),
+            ]
+        )
     except Exception as exc:
         raise GeneratorUnavailableError(
             "Local generator LLM is unavailable. Confirm the configured "
             "OpenAI-compatible endpoint is running and reachable."
         ) from exc
 
-    return answer.strip()
+    return _message_content_to_text(response.content).strip()
 
 
 def format_context_blocks(documents: list[Document]) -> str:
@@ -81,3 +81,17 @@ def _metadata_value(value: object) -> str:
     if value is None or value == "":
         return "unknown"
     return str(value)
+
+
+def _message_content_to_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or ""))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    return str(content)

@@ -7,7 +7,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_rag_settings
 from app.document_loader import ALLOWED_FILE_EXTENSIONS, load_file_as_documents, load_text_as_documents
-from app.rag_chain import GeneratorUnavailableError, generate_answer
+from app.rag_chain import GeneratorUnavailableError
+from app.rag_graph import run_rag_graph
 from app.schemas import (
     DeleteDocumentResponse,
     DocumentListResponse,
@@ -17,7 +18,6 @@ from app.schemas import (
     QueryRequest,
     QueryResponse,
     RagStatusResponse,
-    SourceChunk,
 )
 from app.storage import (
     content_hash_from_text,
@@ -40,7 +40,6 @@ from app.vector_store import (
     get_document_by_hash,
     get_document_storage,
     list_documents,
-    similarity_search,
 )
 
 
@@ -309,59 +308,33 @@ def query(request: QueryRequest) -> QueryResponse:
     settings = get_rag_settings()
     top_k = request.top_k or settings.rag_top_k
     filters = _query_filters(request)
-    documents = _retrieve_documents(
-        question=request.question,
-        top_k=top_k,
-        filters=filters,
-        retrieval_mode=request.retrieval_mode,
-    )
-    sources = [_document_to_source_chunk(document) for document in documents]
-
-    if not documents:
-        return QueryResponse(
-            answer="No relevant indexed information was found for this question.",
-            sources=sources,
-            retrieved_chunk_count=0,
-            retrieval_mode=request.retrieval_mode,
-            filters_applied=filters,
-        )
-
     try:
-        answer = generate_answer(request.question, documents, settings)
+        result = run_rag_graph(
+            question=request.question,
+            top_k=top_k,
+            retrieval_mode=request.retrieval_mode,
+            filters=filters,
+            settings=settings,
+        )
+    except HybridRetrievalUnavailableError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GeneratorUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return QueryResponse(
-        answer=answer,
-        sources=sources,
-        retrieved_chunk_count=len(documents),
+        answer=result["answer"],
+        sources=result.get("sources", []),
+        retrieved_chunk_count=result.get("retrieved_chunk_count", 0),
         retrieval_mode=request.retrieval_mode,
-        filters_applied=filters,
+        filters_applied=result.get("filters_applied", filters),
     )
 
 
 def _index_documents(documents: list) -> tuple[int, int]:
     try:
         return add_documents(documents)
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-
-def _retrieve_documents(
-    question: str,
-    top_k: int,
-    filters: dict[str, str],
-    retrieval_mode: str,
-) -> list:
-    try:
-        return similarity_search(
-            query=question,
-            top_k=top_k,
-            filters=filters,
-            retrieval_mode=retrieval_mode,
-        )
-    except HybridRetrievalUnavailableError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -373,28 +346,6 @@ def _query_filters(request: QueryRequest) -> dict[str, str]:
         if value is not None and value.strip():
             filters[field] = value.strip()
     return filters
-
-
-def _document_to_source_chunk(document) -> SourceChunk:
-    metadata = document.metadata
-    return SourceChunk(
-        source_id=metadata.get("source_id"),
-        filename=metadata.get("filename"),
-        doc_type=metadata.get("doc_type"),
-        chunk_index=metadata.get("chunk_index"),
-        page_number=metadata.get("page_number"),
-        text=document.page_content,
-        distance=metadata.get("distance"),
-        content_hash=metadata.get("content_hash"),
-        document_hash=metadata.get("document_hash"),
-        stored_file_path=metadata.get("stored_file_path"),
-        retrieval_score=metadata.get("retrieval_score"),
-        section_title=metadata.get("section_title"),
-        row_number=metadata.get("row_number"),
-        chunk_char_count=metadata.get("chunk_char_count"),
-    )
-
-
 def _enrich_documents(
     documents: list,
     stored_file_path: str,

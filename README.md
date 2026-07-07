@@ -10,12 +10,18 @@ Rohan stack:
 - Document parsing: Docling
 - Embeddings: `BAAI/bge-m3`
 - Vector search: Weaviate
-- Workflow: LangChain
+- Workflow: LangGraph
 - Generator: local OpenAI-compatible Ministral or Mistral endpoint
 
 Phase 6 adds broader document processing, upload validation, parser diagnostics,
-and processing evaluation. The existing ingestion, status, document, retrieval,
-and query endpoints remain available.
+and processing evaluation. Phase 6.5 uses LangGraph for RAG workflow
+orchestration. The existing ingestion, status, document, retrieval, and query
+endpoints remain available.
+
+The query workflow is a LangGraph graph with `retrieve`, `decide`, `generate`,
+and `fallback` nodes. Retrieval remains in Weaviate, embeddings remain
+`BAAI/bge-m3`, and generation still uses the configured local OpenAI-compatible
+Ministral endpoint.
 
 ## Start
 
@@ -179,6 +185,10 @@ Optional metadata filters are supported:
 When more than one filter is supplied, all filters must match. If no matching
 chunks are retrieved, the API returns HTTP 200 with no sources and does not call
 the generator.
+
+`/rag/query` is orchestrated by LangGraph. The graph retrieves chunks, decides
+whether any context exists, calls the generator only when documents were found,
+and otherwise returns the no-information fallback answer.
 
 Responses keep `answer`, `sources`, and `retrieved_chunk_count`, and also return
 `retrieval_mode` and `filters_applied`. Source entries include metadata such as

@@ -14,7 +14,6 @@ FORBIDDEN = (
     "qd" + "rant",
     "mil" + "vus",
     "qw" + "en",
-    "lang" + "graph",
     "ll" + "ama" + "index",
 )
 ALLOWED_MODEL_TERM_PATTERNS = (
