@@ -18,7 +18,7 @@ and processing evaluation. Phase 6.5 uses LangGraph for RAG workflow
 orchestration. Phase 7 removes the retired chain framework from project code and
 dependencies while preserving the existing ingestion, status, document,
 retrieval, query, and frontend behavior. Production Backend Hardening is now
-Phase 8.
+Phase 8, adding API key authentication and project-level isolation.
 
 The query workflow is a LangGraph graph with `retrieve`, `decide`, `generate`,
 and `fallback` nodes. Retrieval remains in Weaviate, embeddings remain
@@ -45,7 +45,10 @@ http://localhost:8090
 ```
 
 The frontend is served by FastAPI from `app/static` and uses the same backend
-origin. It calls:
+origin. The Settings panel stores an optional API key and project ID in browser
+localStorage. When present, the key is sent as `X-RAG-API-Key`, and the project
+ID is sent with ingestion, query, document list, delete, and download requests.
+It calls:
 
 - `GET /health` and `GET /rag/status` for status
 - `POST /rag/ingest/file` for PDF/TXT uploads
@@ -82,7 +85,7 @@ data/uploads/<source_id>/<safe_filename>
 The saved original file is separate from the indexed chunks. Original files live
 on disk in `data/uploads`; parsed chunks, embeddings, and metadata live in the
 generic Weaviate `KnowledgeBase` collection. Each new chunk includes metadata
-such as `source_id`, `filename`, `original_filename`, `stored_file_path`,
+such as `project_id`, `source_id`, `filename`, `original_filename`, `stored_file_path`,
 `doc_type`, `chunk_index`, optional `page_number`, `document_hash`, and
 `content_hash`. The stack also stores processing metadata such as `parser_used`,
 `detected_extension`, `original_file_size_bytes`, `warnings`, `section_title`,
@@ -107,15 +110,73 @@ curl http://localhost:8090/health
 curl http://localhost:8090/rag/status
 ```
 
+The status response includes `auth_required` and `default_project_id`. It never
+exposes the configured API key.
+
+## Authentication
+
+Authentication is disabled by default for local development:
+
+```env
+RAG_REQUIRE_API_KEY=false
+RAG_API_KEY=dev-rag-key
+```
+
+When `RAG_REQUIRE_API_KEY=true`, these protected endpoints require
+`X-RAG-API-Key`:
+
+- `POST /rag/ingest/text`
+- `POST /rag/ingest/file`
+- `GET /rag/documents`
+- `GET /rag/documents/{source_id}/download`
+- `DELETE /rag/documents/{source_id}`
+- `POST /rag/query`
+
+These endpoints remain public:
+
+- `GET /`
+- `HEAD /`
+- static assets under `/static`
+- `GET /health`
+- `GET /rag/status`
+
+Enable and test locally:
+
+```bash
+RAG_REQUIRE_API_KEY=true RAG_API_KEY=dev-rag-key docker compose up -d --build
+curl -i "http://localhost:8090/rag/documents"
+curl -i "http://localhost:8090/rag/documents" -H "X-RAG-API-Key: wrong-key"
+curl -i "http://localhost:8090/rag/documents" -H "X-RAG-API-Key: dev-rag-key"
+docker compose up -d --build
+```
+
+The first two protected requests should return HTTP 401. The request with the
+correct header should return HTTP 200. The final command restores default
+non-required auth mode.
+
+## Project Isolation
+
+`RAG_DEFAULT_PROJECT_ID` defaults to `default`. API clients can pass
+`project_id` on ingestion, query, list, delete, and download requests. Project
+IDs may contain only letters, numbers, dash, and underscore. If omitted, the
+default project is used.
+
+Every indexed chunk stores `project_id`. Retrieval always filters by project,
+document listing only shows documents for the requested project, delete only
+removes chunks for that project, and download only succeeds when the requested
+`source_id` belongs to that project. Duplicate prevention is also project-aware:
+the same document in one project is treated as a duplicate, while the same
+document in another project can be indexed separately.
+
 ## Text Ingestion
 
 ```bash
 curl -X POST "http://localhost:8090/rag/ingest/text" \
   -H "Content-Type: application/json" \
-  -d '{"text":"The refund policy allows cancellation within 7 days of purchase. Support is available from 9 AM to 6 PM.","filename":"test-policy.txt","doc_type":"general"}'
+  -d '{"text":"The refund policy allows cancellation within 7 days of purchase. Support is available from 9 AM to 6 PM.","filename":"test-policy.txt","doc_type":"general","project_id":"default"}'
 ```
 
-The response includes `source_id`, `chunks_indexed`, `chunks_skipped`,
+The response includes `project_id`, `source_id`, `chunks_indexed`, `chunks_skipped`,
 `duplicate`, `stored_file_path`, and `message`.
 
 ## File Ingestion
@@ -123,7 +184,8 @@ The response includes `source_id`, `chunks_indexed`, `chunks_skipped`,
 ```bash
 curl -X POST "http://localhost:8090/rag/ingest/file" \
   -F "file=@/path/to/sample-document.pdf" \
-  -F "doc_type=general"
+  -F "doc_type=general" \
+  -F "project_id=default"
 ```
 
 Allowed upload extensions are `.pdf`, `.txt`, `.md`, `.docx`, and `.csv`.
@@ -178,15 +240,16 @@ Optional metadata filters are supported:
   "question": "What is the refund policy?",
   "top_k": 3,
   "retrieval_mode": "vector",
+  "project_id": "default",
   "doc_type": "general",
   "filename": "policy.txt",
   "source_id": "example-source-id"
 }
 ```
 
-When more than one filter is supplied, all filters must match. If no matching
-chunks are retrieved, the API returns HTTP 200 with no sources and does not call
-the generator.
+When more than one filter is supplied, all filters must match. The project
+filter is always applied. If no matching chunks are retrieved, the API returns
+HTTP 200 with no sources and does not call the generator.
 
 `/rag/query` is orchestrated by LangGraph. The graph retrieves chunks, decides
 whether any context exists, calls the generator only when documents were found,
@@ -207,6 +270,12 @@ List indexed documents grouped by `source_id`:
 curl http://localhost:8090/rag/documents
 ```
 
+List another project:
+
+```bash
+curl "http://localhost:8090/rag/documents?project_id=alpha"
+```
+
 Delete all chunks for a document:
 
 ```bash
@@ -219,8 +288,8 @@ Download the saved original file when available:
 curl -I "http://localhost:8090/rag/documents/<SOURCE_ID>/download"
 ```
 
-Delete removes all Weaviate chunks for the `source_id`, then removes any saved
-original file recorded in chunk metadata. Older indexed documents without
+Delete removes all Weaviate chunks for the `source_id` in the requested project,
+then removes any saved original file recorded in chunk metadata. Older indexed documents without
 `stored_file_path` can still be listed and deleted, but download returns 404 with
 a clear message.
 
@@ -228,12 +297,12 @@ a clear message.
 
 File ingestion computes `document_hash` from file bytes plus `doc_type`. Text
 ingestion computes `document_hash` from normalized text plus filename and
-`doc_type`. If the hash already exists in Weaviate, the API skips saving another
-file and returns `duplicate: true`.
+`doc_type`. If the hash already exists in Weaviate for the same project, the API
+skips saving another file and returns `duplicate: true`.
 
 Each chunk also gets a `content_hash` from normalized chunk text, filename,
-`doc_type`, and `chunk_index`. If an individual chunk hash already exists, that
-chunk is skipped and counted in `chunks_skipped`.
+`doc_type`, and `chunk_index`. If an individual chunk hash already exists in the
+same project, that chunk is skipped and counted in `chunks_skipped`.
 
 ## Generator Configuration
 
@@ -283,3 +352,15 @@ python3 scripts/evaluate_processing.py
 The script creates temporary TXT, MD, CSV, and DOCX samples, uploads them through
 `/rag/ingest/file`, verifies processing diagnostics, accepts duplicate uploads,
 and runs a hybrid query with a filename filter.
+
+## Auth And Project Evaluation
+
+With the stack running on `http://localhost:8090`, run:
+
+```bash
+python3 scripts/evaluate_auth_projects.py
+```
+
+The script ingests one document into project `alpha` and one into `beta`, verifies
+query and document-list isolation, deletes the alpha document within project
+`alpha`, and confirms the beta document remains.

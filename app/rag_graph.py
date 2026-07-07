@@ -127,6 +127,7 @@ def _get_graph():
 def _document_to_source_chunk(document: RagDocument) -> SourceChunk:
     metadata: dict[str, Any] = document.metadata
     return SourceChunk(
+        project_id=metadata.get("project_id"),
         source_id=metadata.get("source_id"),
         filename=metadata.get("filename"),
         doc_type=metadata.get("doc_type"),

@@ -1,6 +1,8 @@
 const state = {
   health: null,
   status: null,
+  apiKey: localStorage.getItem("rag_api_key") || "",
+  projectId: localStorage.getItem("rag_project_id") || "",
 };
 
 const elements = {
@@ -12,6 +14,11 @@ const elements = {
   generatorModel: document.querySelector("#generator-model"),
   statusMessage: document.querySelector("#status-message"),
   uploadLimits: document.querySelector("#upload-limits"),
+  settingsForm: document.querySelector("#settings-form"),
+  apiKeyInput: document.querySelector("#api-key-input"),
+  projectIdInput: document.querySelector("#project-id-input"),
+  currentProject: document.querySelector("#current-project"),
+  clearSettings: document.querySelector("#clear-settings"),
   fileForm: document.querySelector("#file-form"),
   fileInput: document.querySelector("#file-input"),
   fileDocType: document.querySelector("#file-doc-type"),
@@ -36,9 +43,10 @@ const elements = {
 };
 
 async function requestJson(url, options = {}) {
+  const preparedOptions = withAuthHeaders(options);
   let response;
   try {
-    response = await fetch(url, options);
+    response = await fetch(url, preparedOptions);
   } catch (error) {
     throw new Error(`API unavailable: ${error.message}`);
   }
@@ -53,6 +61,27 @@ async function requestJson(url, options = {}) {
     throw new Error(detail || `Request failed with HTTP ${response.status}`);
   }
   return body;
+}
+
+function withAuthHeaders(options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (state.apiKey) {
+    headers.set("X-RAG-API-Key", state.apiKey);
+  }
+  return { ...options, headers };
+}
+
+function currentProjectId() {
+  const fallback = state.status?.default_project_id || "default";
+  return (state.projectId || fallback).trim() || fallback;
+}
+
+function applyProjectToPayload(payload) {
+  payload.project_id = currentProjectId();
+}
+
+function projectQueryString() {
+  return `project_id=${encodeURIComponent(currentProjectId())}`;
 }
 
 function renderJson(target, data) {
@@ -86,6 +115,7 @@ async function refreshStatus() {
     elements.generatorModel.textContent = health.generator_model || "-";
     elements.statusMessage.textContent = status.message || "";
     renderUploadLimits(health);
+    renderCurrentProject();
 
     elements.statusBadge.textContent = status.weaviate_reachable ? "Ready" : "Degraded";
     elements.statusBadge.className = status.weaviate_reachable ? "badge ok" : "badge warn";
@@ -100,6 +130,45 @@ async function refreshStatus() {
   }
 }
 
+function initializeSettings() {
+  elements.apiKeyInput.value = state.apiKey;
+  elements.projectIdInput.value = state.projectId;
+  renderCurrentProject();
+}
+
+function renderCurrentProject() {
+  elements.currentProject.textContent = `Project: ${currentProjectId()}`;
+}
+
+function saveSettings(event) {
+  event.preventDefault();
+  state.apiKey = elements.apiKeyInput.value.trim();
+  state.projectId = elements.projectIdInput.value.trim();
+  if (state.apiKey) {
+    localStorage.setItem("rag_api_key", state.apiKey);
+  } else {
+    localStorage.removeItem("rag_api_key");
+  }
+  if (state.projectId) {
+    localStorage.setItem("rag_project_id", state.projectId);
+  } else {
+    localStorage.removeItem("rag_project_id");
+  }
+  renderCurrentProject();
+  refreshDocuments();
+}
+
+function clearSettings() {
+  state.apiKey = "";
+  state.projectId = "";
+  localStorage.removeItem("rag_api_key");
+  localStorage.removeItem("rag_project_id");
+  elements.apiKeyInput.value = "";
+  elements.projectIdInput.value = "";
+  renderCurrentProject();
+  refreshDocuments();
+}
+
 function renderUploadLimits(health) {
   if (!elements.uploadLimits) {
     return;
@@ -112,7 +181,7 @@ function renderUploadLimits(health) {
 async function refreshDocuments() {
   elements.documentsList.innerHTML = '<p class="message muted">Loading documents...</p>';
   try {
-    const data = await requestJson("/rag/documents");
+    const data = await requestJson(`/rag/documents?${projectQueryString()}`);
     const documents = data.documents || [];
     if (!documents.length) {
       elements.documentsList.innerHTML =
@@ -144,6 +213,7 @@ function renderDocument(documentSummary) {
   const meta = document.createElement("div");
   meta.className = "meta";
   meta.append(
+    metaSpan(`project: ${documentSummary.project_id || currentProjectId()}`),
     metaSpan(`type: ${documentSummary.doc_type || "unknown"}`),
     metaSpan(`source_id: ${documentSummary.source_id}`),
     metaSpan(`chunks: ${documentSummary.chunk_count}`),
@@ -203,13 +273,7 @@ function renderDocument(documentSummary) {
     downloadButton.type = "button";
     downloadButton.className = "secondary";
     downloadButton.textContent = "Download";
-    downloadButton.addEventListener("click", () => {
-      window.open(
-        `/rag/documents/${encodeURIComponent(documentSummary.source_id)}/download`,
-        "_blank",
-        "noopener",
-      );
-    });
+    downloadButton.addEventListener("click", () => downloadDocument(documentSummary));
     actions.append(downloadButton);
   }
   const deleteButton = document.createElement("button");
@@ -230,6 +294,28 @@ function metaSpan(text) {
   return span;
 }
 
+async function downloadDocument(documentSummary) {
+  const url = `/rag/documents/${encodeURIComponent(documentSummary.source_id)}/download?${projectQueryString()}`;
+  try {
+    const response = await fetch(url, withAuthHeaders());
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `Request failed with HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = documentSummary.filename || "document";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch (error) {
+    window.alert(`Download failed: ${error.message}`);
+  }
+}
+
 async function deleteDocument(sourceId) {
   const confirmed = window.confirm(
     `Delete indexed chunks and any stored original file for source_id ${sourceId}?`,
@@ -239,7 +325,7 @@ async function deleteDocument(sourceId) {
   }
 
   try {
-    const result = await requestJson(`/rag/documents/${encodeURIComponent(sourceId)}`, {
+    const result = await requestJson(`/rag/documents/${encodeURIComponent(sourceId)}?${projectQueryString()}`, {
       method: "DELETE",
     });
     await refreshDocuments();
@@ -263,6 +349,7 @@ async function ingestFile(event) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("doc_type", elements.fileDocType.value || "general");
+  formData.append("project_id", currentProjectId());
 
   setFormBusy(elements.fileForm, true);
   try {
@@ -286,6 +373,7 @@ async function ingestText(event) {
     filename: elements.textFilename.value || "manual-note.txt",
     doc_type: elements.textDocType.value || "general",
   };
+  applyProjectToPayload(payload);
 
   setFormBusy(elements.textForm, true);
   try {
@@ -310,6 +398,7 @@ async function askQuestion(event) {
     top_k: Number(elements.topKInput.value || 3),
     retrieval_mode: elements.retrievalModeInput.value || "vector",
   };
+  applyProjectToPayload(payload);
   addOptionalFilter(payload, "doc_type", elements.queryDocTypeInput.value);
   addOptionalFilter(payload, "filename", elements.queryFilenameInput.value);
   addOptionalFilter(payload, "source_id", elements.querySourceIdInput.value);
@@ -379,6 +468,7 @@ function renderSource(source) {
   const meta = document.createElement("div");
   meta.className = "meta";
   meta.append(
+    metaSpan(`project: ${source.project_id || currentProjectId()}`),
     metaSpan(`type: ${source.doc_type || "unknown"}`),
     metaSpan(`source_id: ${source.source_id || "unknown"}`),
     metaSpan(`chunk: ${source.chunk_index ?? "unknown"}`),
@@ -447,9 +537,12 @@ function setFormBusy(form, busy) {
 
 elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.refreshDocuments.addEventListener("click", refreshDocuments);
+elements.settingsForm.addEventListener("submit", saveSettings);
+elements.clearSettings.addEventListener("click", clearSettings);
 elements.fileForm.addEventListener("submit", ingestFile);
 elements.textForm.addEventListener("submit", ingestText);
 elements.queryForm.addEventListener("submit", askQuestion);
 
+initializeSettings();
 refreshStatus();
 refreshDocuments();

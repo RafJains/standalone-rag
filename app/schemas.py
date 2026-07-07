@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class SourceChunk(BaseModel):
+    project_id: str | None = None
     source_id: str | None = None
     filename: str | None = None
     doc_type: str | None = None
@@ -22,12 +23,14 @@ class SourceChunk(BaseModel):
 
 class IngestTextRequest(BaseModel):
     text: str
+    project_id: str | None = None
     source_id: str | None = None
     filename: str | None = None
     doc_type: str = "general"
 
 
 class IngestResponse(BaseModel):
+    project_id: str
     source_id: str
     chunks_indexed: int
     chunks_skipped: int = 0
@@ -42,6 +45,7 @@ class IngestResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str
+    project_id: str | None = None
     top_k: int = Field(default=5, ge=1)
     retrieval_mode: Literal["vector", "hybrid"] = "vector"
     doc_type: str | None = None
@@ -58,6 +62,7 @@ class QueryResponse(BaseModel):
 
 
 class DocumentSummary(BaseModel):
+    project_id: str
     source_id: str
     filename: str | None = None
     original_filename: str | None = None
@@ -79,6 +84,7 @@ class DocumentListResponse(BaseModel):
 
 
 class DeleteDocumentResponse(BaseModel):
+    project_id: str
     source_id: str
     deleted_count: int
     deleted_files: list[str] = Field(default_factory=list)
@@ -94,4 +100,6 @@ class RagStatusResponse(BaseModel):
     weaviate_url: str
     weaviate_collection: str
     weaviate_reachable: bool
+    auth_required: bool = False
+    default_project_id: str = "default"
     message: str

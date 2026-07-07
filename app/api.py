@@ -1,10 +1,11 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.auth import require_api_key, resolve_project_id
 from app.config import get_rag_settings
 from app.document_loader import ALLOWED_FILE_EXTENSIONS, load_file_as_documents, load_text_as_documents
 from app.generator import GeneratorUnavailableError
@@ -92,14 +93,17 @@ def rag_status() -> RagStatusResponse:
         weaviate_url=settings.weaviate_url,
         weaviate_collection=settings.weaviate_collection,
         weaviate_reachable=reachable,
+        auth_required=settings.rag_require_api_key,
+        default_project_id=settings.rag_default_project_id,
         message=message,
     )
 
 
-@app.get("/rag/documents", response_model=DocumentListResponse)
-def documents() -> DocumentListResponse:
+@app.get("/rag/documents", response_model=DocumentListResponse, dependencies=[Depends(require_api_key)])
+def documents(project_id: str | None = Query(default=None)) -> DocumentListResponse:
+    resolved_project_id = resolve_project_id(project_id)
     try:
-        summaries = list_documents()
+        summaries = list_documents(resolved_project_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     summaries = [_with_file_availability(summary) for summary in summaries]
@@ -109,13 +113,18 @@ def documents() -> DocumentListResponse:
 
 
 @app.head("/rag/documents/{source_id}/download")
-@app.get("/rag/documents/{source_id}/download")
-def download_document(source_id: str) -> FileResponse:
+@app.get("/rag/documents/{source_id}/download", dependencies=[Depends(require_api_key)])
+def download_document(
+    source_id: str,
+    project_id: str | None = Query(default=None),
+    _: None = Depends(require_api_key),
+) -> FileResponse:
     if not source_id.strip():
         raise HTTPException(status_code=400, detail="source_id cannot be empty")
+    resolved_project_id = resolve_project_id(project_id)
 
     try:
-        storage = get_document_storage(source_id)
+        storage = get_document_storage(source_id, resolved_project_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -133,14 +142,22 @@ def download_document(source_id: str) -> FileResponse:
     )
 
 
-@app.delete("/rag/documents/{source_id}", response_model=DeleteDocumentResponse)
-def delete_document(source_id: str) -> DeleteDocumentResponse:
+@app.delete(
+    "/rag/documents/{source_id}",
+    response_model=DeleteDocumentResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def delete_document(
+    source_id: str,
+    project_id: str | None = Query(default=None),
+) -> DeleteDocumentResponse:
     if not source_id.strip():
         raise HTTPException(status_code=400, detail="source_id cannot be empty")
+    resolved_project_id = resolve_project_id(project_id)
 
     try:
-        storage = get_document_storage(source_id)
-        deleted_count = delete_documents_by_source_id(source_id)
+        storage = get_document_storage(source_id, resolved_project_id)
+        deleted_count = delete_documents_by_source_id(source_id, resolved_project_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -166,6 +183,7 @@ def delete_document(source_id: str) -> DeleteDocumentResponse:
         message = f"No indexed chunks found for source_id {source_id}."
 
     return DeleteDocumentResponse(
+        project_id=resolved_project_id,
         source_id=source_id,
         deleted_count=deleted_count,
         deleted_files=deleted_files,
@@ -173,11 +191,12 @@ def delete_document(source_id: str) -> DeleteDocumentResponse:
     )
 
 
-@app.post("/rag/ingest/text", response_model=IngestResponse)
+@app.post("/rag/ingest/text", response_model=IngestResponse, dependencies=[Depends(require_api_key)])
 def ingest_text(request: IngestTextRequest) -> IngestResponse:
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="text cannot be empty")
 
+    project_id = resolve_project_id(request.project_id)
     source_id = request.source_id or str(uuid4())
     filename = safe_filename(request.filename, "manual-note.txt")
     doc_type = (request.doc_type or "general").strip() or "general"
@@ -185,7 +204,7 @@ def ingest_text(request: IngestTextRequest) -> IngestResponse:
     document_hash = document_hash_from_text(request.text, filename, doc_type)
 
     try:
-        existing = get_document_by_hash(document_hash)
+        existing = get_document_by_hash(document_hash, project_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if existing:
@@ -212,9 +231,11 @@ def ingest_text(request: IngestTextRequest) -> IngestResponse:
         warnings=[],
         original_file_size_bytes=text_size_bytes,
         detected_extension=Path(filename).suffix.lower() or ".txt",
+        project_id=project_id,
     )
     chunks_indexed, chunks_skipped = _index_documents(documents)
     return IngestResponse(
+        project_id=project_id,
         source_id=source_id,
         chunks_indexed=chunks_indexed,
         chunks_skipped=chunks_skipped,
@@ -233,7 +254,10 @@ async def ingest_file(
     file: UploadFile = File(...),
     doc_type: str = Form("general"),
     source_id: str | None = Form(None),
+    project_id: str | None = Form(None),
+    _: None = Depends(require_api_key),
 ) -> IngestResponse:
+    resolved_project_id = resolve_project_id(project_id)
     resolved_source_id = source_id or str(uuid4())
     original_filename = file.filename or "upload"
     filename = safe_filename(original_filename, "upload")
@@ -252,7 +276,7 @@ async def ingest_file(
 
     document_hash = document_hash_from_bytes(content, doc_type)
     try:
-        existing = get_document_by_hash(document_hash)
+        existing = get_document_by_hash(document_hash, resolved_project_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if existing:
@@ -281,9 +305,11 @@ async def ingest_file(
             warnings=processing.warnings,
             original_file_size_bytes=len(content),
             detected_extension=processing.detected_extension or detected_extension,
+            project_id=resolved_project_id,
         )
         chunks_indexed, chunks_skipped = _index_documents(documents)
         return IngestResponse(
+            project_id=resolved_project_id,
             source_id=resolved_source_id,
             chunks_indexed=chunks_indexed,
             chunks_skipped=chunks_skipped,
@@ -300,14 +326,15 @@ async def ingest_file(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/rag/query", response_model=QueryResponse)
+@app.post("/rag/query", response_model=QueryResponse, dependencies=[Depends(require_api_key)])
 def query(request: QueryRequest) -> QueryResponse:
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="question cannot be empty")
 
     settings = get_rag_settings()
+    project_id = resolve_project_id(request.project_id)
     top_k = request.top_k or settings.rag_top_k
-    filters = _query_filters(request)
+    filters = _query_filters(request, project_id)
     try:
         result = run_rag_graph(
             question=request.question,
@@ -339,13 +366,15 @@ def _index_documents(documents: list) -> tuple[int, int]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-def _query_filters(request: QueryRequest) -> dict[str, str]:
-    filters = {}
+def _query_filters(request: QueryRequest, project_id: str) -> dict[str, str]:
+    filters = {"project_id": project_id}
     for field in ("doc_type", "filename", "source_id"):
         value = getattr(request, field)
         if value is not None and value.strip():
             filters[field] = value.strip()
     return filters
+
+
 def _enrich_documents(
     documents: list,
     stored_file_path: str,
@@ -355,12 +384,14 @@ def _enrich_documents(
     warnings: list[str],
     original_file_size_bytes: int,
     detected_extension: str,
+    project_id: str,
 ) -> None:
     for document in documents:
         metadata = document.metadata
         filename = metadata.get("filename") or original_filename
         doc_type = metadata.get("doc_type") or "general"
         chunk_index = metadata.get("chunk_index") or 0
+        metadata["project_id"] = project_id
         metadata["stored_file_path"] = stored_file_path
         metadata["original_filename"] = original_filename
         metadata["document_hash"] = document_hash
@@ -381,6 +412,7 @@ def _duplicate_ingest_response(existing: dict) -> IngestResponse:
     skipped = existing.get("chunk_count") or 1
     source_id = str(existing["source_id"])
     return IngestResponse(
+        project_id=str(existing["project_id"]),
         source_id=source_id,
         chunks_indexed=0,
         chunks_skipped=int(skipped),

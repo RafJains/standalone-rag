@@ -36,6 +36,7 @@ SKIP_PATHS = {
     ("data", "uploads"),
     ("data", "demo_documents"),
 }
+EXPECTED_COMPOSE_SERVICES = {"weaviate", "rag-api"}
 
 
 def iter_files() -> list[Path]:
@@ -72,6 +73,12 @@ def main() -> int:
             if model_term in lowered and not line_has_allowed_model_term(line):
                 failures.append(f"{rel_path}:{line_number}: forbidden term '{model_term}'")
 
+    services = compose_service_names(ROOT / "docker-compose.yml")
+    if services != EXPECTED_COMPOSE_SERVICES:
+        expected = ", ".join(sorted(EXPECTED_COMPOSE_SERVICES))
+        actual = ", ".join(sorted(services)) or "(none)"
+        failures.append(f"docker-compose.yml: expected services {expected}; found {actual}")
+
     if failures:
         print("RAG stack validation failed:")
         for failure in failures:
@@ -80,6 +87,22 @@ def main() -> int:
 
     print("RAG stack validation passed.")
     return 0
+
+
+def compose_service_names(path: Path) -> set[str]:
+    services: set[str] = set()
+    in_services = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("services:"):
+            in_services = True
+            continue
+        if in_services and line and not line.startswith(" "):
+            break
+        if in_services and line.startswith("  ") and not line.startswith("    "):
+            name = line.strip().rstrip(":")
+            if name:
+                services.add(name)
+    return services
 
 
 if __name__ == "__main__":

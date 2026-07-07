@@ -146,6 +146,7 @@ button.danger:hover {
 }
 
 .status-panel,
+.settings-panel,
 .document-panel,
 .qa-panel {
   grid-column: 1 / -1;
@@ -219,6 +220,13 @@ dd {
 .form-stack {
   display: grid;
   gap: 12px;
+}
+
+.settings-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto;
+  gap: 12px;
+  align-items: end;
 }
 
 .field-hint {
@@ -388,6 +396,7 @@ textarea:focus {
 
   .layout,
   .status-grid,
+  .settings-form,
   .query-form {
     grid-template-columns: 1fr;
   }

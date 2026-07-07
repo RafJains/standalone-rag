@@ -42,11 +42,30 @@
         <p id="status-message" class="message muted"></p>
       </section>
 
+      <section class="panel settings-panel" aria-labelledby="settings-title">
+        <div class="panel-heading">
+          <h2 id="settings-title">Settings</h2>
+          <span id="current-project" class="badge">Project: default</span>
+        </div>
+        <form id="settings-form" class="settings-form">
+          <label>
+            API key
+            <input id="api-key-input" type="password" autocomplete="off" placeholder="dev-rag-key" />
+          </label>
+          <label>
+            Project ID
+            <input id="project-id-input" type="text" placeholder="default" />
+          </label>
+          <button type="submit">Save Settings</button>
+          <button id="clear-settings" type="button" class="secondary">Clear Settings</button>
+        </form>
+      </section>
+
       <section class="panel" aria-labelledby="file-upload-title">
         <h2 id="file-upload-title">Upload Document</h2>
         <form id="file-form" class="form-stack">
           <label>
-            PDF or TXT file
+            Supported file
             <input id="file-input" name="file" type="file" accept=".pdf,.txt,.md,.docx,.csv,text/plain,text/markdown,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required />
           </label>
           <p id="upload-limits" class="field-hint">Allowed: PDF, TXT, MD, DOCX, CSV.</p>

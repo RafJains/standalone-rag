@@ -15,31 +15,35 @@ while preserving the existing API and frontend behavior. Phase 7 removes the
 retired chain framework from project code and dependencies, keeps LangGraph as
 the workflow layer, keeps Weaviate retrieval, keeps `BAAI/bge-m3` embeddings,
 and keeps the local OpenAI-compatible Ministral generator endpoint. Production
-Backend Hardening is now Phase 8.
+Backend Hardening is now Phase 8, adding API key authentication and project
+isolation without adding services or changing the generic collection name.
 
 RAG flow:
 
 1. Text or files are accepted by `app.api`.
-2. The API creates a `source_id`, computes a document hash, and checks Weaviate
-   for an existing document before saving a new copy.
-3. Original uploads and pasted text are saved under
+2. Protected endpoints optionally require `X-RAG-API-Key` when
+   `RAG_REQUIRE_API_KEY=true`.
+3. The API validates `project_id`, using `RAG_DEFAULT_PROJECT_ID` when omitted.
+4. The API creates a `source_id`, computes a document hash, and checks Weaviate
+   for an existing document in the same project before saving a new copy.
+5. Original uploads and pasted text are saved under
    `data/uploads/<source_id>/<safe_filename>`.
-4. `app.document_loader` validates and parses supported documents: PDF, TXT,
+6. `app.document_loader` validates and parses supported documents: PDF, TXT,
    Markdown, DOCX, and CSV.
-5. Docling `HybridChunker` is used when available. A conservative text chunking
+7. Docling `HybridChunker` is used when available. A conservative text chunking
    fallback is used for `.txt`, PDFs via `pypdf`, and Docling API differences.
-6. Each chunk receives storage metadata, parser metadata, `document_hash`, and
-   `content_hash`.
-7. `app.embeddings` embeds new chunks with `BAAI/bge-m3`.
-8. `app.vector_store` writes external vectors and metadata into Weaviate.
-9. `app.vector_store.similarity_search` retrieves the most relevant chunks
-   using vector search by default, optional metadata filters, and optional
-   hybrid search when supported by Weaviate.
-10. `app.rag_graph` runs a LangGraph workflow with `retrieve`, `decide`,
+8. Each chunk receives `project_id`, storage metadata, parser metadata,
+   `document_hash`, and `content_hash`.
+9. `app.embeddings` embeds new chunks with `BAAI/bge-m3`.
+10. `app.vector_store` writes external vectors and metadata into Weaviate.
+11. `app.vector_store.similarity_search` retrieves the most relevant chunks
+    using vector search by default, mandatory project filtering, optional
+    metadata filters, and optional hybrid search when supported by Weaviate.
+12. `app.rag_graph` runs a LangGraph workflow with `retrieve`, `decide`,
     `generate`, and `fallback` nodes.
-11. `app.generator` keeps the grounded prompt and calls the configured local
+13. `app.generator` keeps the grounded prompt and calls the configured local
     OpenAI-compatible generator endpoint directly.
-12. `/rag/query` returns the generated answer, sources, retrieved chunk count,
+14. `/rag/query` returns the generated answer, sources, retrieved chunk count,
     retrieval mode, and applied filters.
 
 Storage layout:
@@ -59,15 +63,15 @@ remove indexed chunks, and deleting chunks alone would not remove a saved file.
 
 Document-management flow:
 
-1. `GET /rag/documents` reads the generic `KnowledgeBase` collection and groups
-   chunks by `source_id`.
-2. Each summary includes filename, original filename, document type, chunk count,
-   available page numbers, preview, stored path, original-file availability, and
-   document hash when available.
+1. `GET /rag/documents` reads the generic `KnowledgeBase` collection, filters by
+   project, and groups chunks by `source_id`.
+2. Each summary includes project ID, filename, original filename, document type,
+   chunk count, available page numbers, preview, stored path, original-file
+   availability, and document hash when available.
 3. `GET /rag/documents/{source_id}/download` returns the saved original file when
-   it still exists.
-4. `DELETE /rag/documents/{source_id}` deletes all matching chunks from
-   Weaviate, removes saved originals listed in metadata, removes an empty
+   it still exists and the source belongs to the requested project.
+4. `DELETE /rag/documents/{source_id}` deletes matching chunks from the requested
+   project in Weaviate, removes saved originals listed in metadata, removes an empty
    `source_id` folder when possible, and returns deleted chunk and file counts.
    Missing source IDs return `deleted_count: 0`.
 
@@ -104,13 +108,15 @@ Open:
 http://localhost:8090
 ```
 
-The console has panels for service status, file upload, text ingestion, indexed
-documents, and question answering. It is vanilla HTML, CSS, and JavaScript in
-`app/static`.
+The console has panels for service status, settings, file upload, text
+ingestion, indexed documents, and question answering. It is vanilla HTML, CSS,
+and JavaScript in `app/static`. Settings are stored in localStorage as
+`rag_api_key` and `rag_project_id`.
 
 To upload documents, use the Upload Document panel with a supported file and a
 `doc_type` such as `general`. Supported extensions are `.pdf`, `.txt`, `.md`,
 `.docx`, and `.csv`. The panel displays the configured maximum upload size.
+Requests include the current project ID and the API key header when one is saved.
 
 To ingest pasted text, use the Ingest Text panel with a filename and `doc_type`.
 
@@ -142,15 +148,53 @@ curl http://localhost:8090/health
 curl http://localhost:8090/rag/status
 ```
 
-`/rag/status` reports the standalone RAG config summary and whether Weaviate is
-reachable. It does not load the embedding model.
+`/rag/status` reports the standalone RAG config summary, whether Weaviate is
+reachable, whether API key auth is required, and the default project ID. It does
+not load the embedding model or expose the API key.
+
+## Authentication
+
+Default local settings:
+
+```bash
+RAG_REQUIRE_API_KEY=false
+RAG_API_KEY=dev-rag-key
+RAG_DEFAULT_PROJECT_ID=default
+```
+
+When `RAG_REQUIRE_API_KEY=true`, the protected endpoints require
+`X-RAG-API-Key`. Missing or wrong keys return HTTP 401, and comparison uses a
+constant-time check. Public endpoints remain `GET /`, `HEAD /`, static assets,
+`GET /health`, and `GET /rag/status`.
+
+Auth-enabled local check:
+
+```bash
+RAG_REQUIRE_API_KEY=true RAG_API_KEY=dev-rag-key docker compose up -d --build
+curl -i "http://localhost:8090/rag/documents"
+curl -i "http://localhost:8090/rag/documents" -H "X-RAG-API-Key: wrong-key"
+curl -i "http://localhost:8090/rag/documents" -H "X-RAG-API-Key: dev-rag-key"
+docker compose up -d --build
+```
+
+The first two protected requests should return HTTP 401. The correct key should
+return HTTP 200. The final command restores default non-required auth mode.
+
+## Project Isolation
+
+Project IDs are validated with a simple letters, numbers, dash, and underscore
+pattern. Omitted values use `RAG_DEFAULT_PROJECT_ID`.
+
+All new chunks store `project_id` in Weaviate. Query, list, delete, and download
+lookups are scoped to that project. Duplicate document and chunk checks are also
+project-aware, so the same document can exist independently in separate projects.
 
 ## Text Ingestion
 
 ```bash
 curl -X POST "http://localhost:8090/rag/ingest/text" \
   -H "Content-Type: application/json" \
-  -d '{"text":"The refund policy allows cancellation within 7 days of purchase. Support is available from 9 AM to 6 PM.","filename":"test-policy.txt","doc_type":"general"}'
+  -d '{"text":"The refund policy allows cancellation within 7 days of purchase. Support is available from 9 AM to 6 PM.","filename":"test-policy.txt","doc_type":"general","project_id":"default"}'
 ```
 
 Pasted text is saved as a `.txt` file under `data/uploads/<source_id>/`. If no
@@ -161,7 +205,8 @@ filename is supplied, the API uses `manual-note.txt`.
 ```bash
 curl -X POST "http://localhost:8090/rag/ingest/file" \
   -F "file=@/path/to/sample-document.pdf" \
-  -F "doc_type=general"
+  -F "doc_type=general" \
+  -F "project_id=default"
 ```
 
 File uploads are validated before saving. Allowed extensions are `.pdf`, `.txt`,
@@ -204,20 +249,20 @@ additional generic metadata properties.
 
 File ingestion computes `document_hash` from file bytes plus `doc_type`. Text
 ingestion computes `document_hash` from normalized text plus filename and
-`doc_type`. If that hash already exists in Weaviate, the API returns the
+`doc_type`. If that hash already exists in Weaviate for the same project, the API returns the
 existing `source_id`, `chunks_indexed: 0`, `duplicate: true`, and skips saving
 another original file.
 
 Chunk-level prevention uses `content_hash`, computed from normalized chunk text,
 filename, `doc_type`, and `chunk_index`. Existing chunk hashes are skipped and
-reported as `chunks_skipped`.
+reported as `chunks_skipped` within the same project.
 
 ## Retrieval Query
 
 ```bash
 curl -X POST "http://localhost:8090/rag/query" \
   -H "Content-Type: application/json" \
-  -d '{"question":"What is the refund policy?","top_k":5,"retrieval_mode":"vector"}'
+  -d '{"question":"What is the refund policy?","top_k":5,"retrieval_mode":"vector","project_id":"default"}'
 ```
 
 When the configured local generator server is running, `/rag/query` returns a
@@ -244,6 +289,7 @@ Optional filters:
   "question": "What is the refund policy?",
   "top_k": 3,
   "retrieval_mode": "vector",
+  "project_id": "default",
   "doc_type": "general",
   "filename": "policy.txt",
   "source_id": "example-source-id"
@@ -251,12 +297,12 @@ Optional filters:
 ```
 
 Multiple filters use AND semantics and are pushed into the Weaviate retrieval
-query. If filters produce no matching chunks, `/rag/query` returns HTTP 200 with
-the no-information answer, `retrieved_chunk_count: 0`, and `sources: []`; the
-generator is not called.
+query. The project filter is always included. If filters produce no matching
+chunks, `/rag/query` returns HTTP 200 with the no-information answer,
+`retrieved_chunk_count: 0`, and `sources: []`; the generator is not called.
 
-Source entries preserve filename, document type, source ID, chunk index, page
-number, text, and vector distance. They also include `content_hash`,
+Source entries preserve project ID, filename, document type, source ID, chunk
+index, page number, text, and vector distance. They also include `content_hash`,
 `document_hash`, `stored_file_path`, and `retrieval_score` when available.
 Smaller vector distances are closer matches. Hybrid retrieval scores are
 returned from Weaviate when the client provides them.
@@ -341,6 +387,19 @@ The script uses `http://localhost:8090`, creates temporary TXT, MD, CSV, and
 DOCX samples, uploads them through `/rag/ingest/file`, verifies that processing
 diagnostics are present, accepts duplicate upload responses, and runs a hybrid
 query with a filename filter.
+
+## Auth And Project Evaluation
+
+With the stack running, execute:
+
+```bash
+python3 scripts/evaluate_auth_projects.py
+```
+
+The script uses `http://localhost:8090`, ingests one text document into project
+`alpha` and one into project `beta`, verifies query isolation, verifies document
+list isolation, deletes the alpha source under project `alpha`, and confirms the
+beta document still exists.
 
 ## Demo Documents
 

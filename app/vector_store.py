@@ -13,6 +13,7 @@ from app.rag_types import RagDocument
 
 COLLECTION_PROPERTIES = [
     Property(name="text", data_type=DataType.TEXT),
+    Property(name="project_id", data_type=DataType.TEXT),
     Property(name="source_id", data_type=DataType.TEXT),
     Property(name="filename", data_type=DataType.TEXT),
     Property(name="original_filename", data_type=DataType.TEXT),
@@ -96,7 +97,11 @@ def add_documents(documents: list[RagDocument]) -> tuple[int, int]:
         documents_to_index = [
             document
             for document in non_empty_documents
-            if not _content_hash_exists(collection, document.metadata.get("content_hash"))
+            if not _content_hash_exists(
+                collection,
+                document.metadata.get("content_hash"),
+                document.metadata.get("project_id"),
+            )
         ]
         skipped_count = len(documents) - len(documents_to_index)
         if not documents_to_index:
@@ -189,7 +194,7 @@ def hybrid_search(
         client.close()
 
 
-def list_documents() -> list[dict[str, Any]]:
+def list_documents(project_id: str) -> list[dict[str, Any]]:
     client = get_weaviate_client()
     documents_by_source: dict[str, dict[str, Any]] = {}
 
@@ -200,6 +205,8 @@ def list_documents() -> list[dict[str, Any]]:
             return_properties=DOCUMENT_RETURN_PROPERTIES,
         ):
             properties = item.properties or {}
+            if str(properties.get("project_id") or "") != project_id:
+                continue
             source_id = properties.get("source_id")
             if not source_id:
                 continue
@@ -208,6 +215,7 @@ def list_documents() -> list[dict[str, Any]]:
             summary = documents_by_source.setdefault(
                 source_key,
                 {
+                    "project_id": project_id,
                     "source_id": source_key,
                     "filename": properties.get("filename"),
                     "original_filename": properties.get("original_filename"),
@@ -271,7 +279,7 @@ def list_documents() -> list[dict[str, Any]]:
         client.close()
 
 
-def get_document_by_hash(document_hash: str) -> dict[str, Any] | None:
+def get_document_by_hash(document_hash: str, project_id: str) -> dict[str, Any] | None:
     if not document_hash:
         return None
 
@@ -280,7 +288,10 @@ def get_document_by_hash(document_hash: str) -> dict[str, Any] | None:
         ensure_collection(client)
         collection = client.collections.get(get_rag_settings().weaviate_collection)
         response = collection.query.fetch_objects(
-            filters=Filter.by_property("document_hash").equal(document_hash),
+            filters=(
+                Filter.by_property("document_hash").equal(document_hash)
+                & Filter.by_property("project_id").equal(project_id)
+            ),
             limit=1,
             return_properties=DOCUMENT_RETURN_PROPERTIES,
         )
@@ -292,6 +303,7 @@ def get_document_by_hash(document_hash: str) -> dict[str, Any] | None:
         if not source_id:
             return None
         return {
+            "project_id": project_id,
             "source_id": str(source_id),
             "filename": properties.get("filename"),
             "stored_file_path": properties.get("stored_file_path"),
@@ -300,7 +312,7 @@ def get_document_by_hash(document_hash: str) -> dict[str, Any] | None:
             "warnings": properties.get("warnings") or [],
             "original_file_size_bytes": properties.get("original_file_size_bytes"),
             "detected_extension": properties.get("detected_extension"),
-            "chunk_count": count_documents_by_source_id(str(source_id)),
+            "chunk_count": count_documents_by_source_id(str(source_id), project_id),
         }
     except WeaviateBaseError as exc:
         raise RuntimeError(f"Could not check document hash in Weaviate: {exc}") from exc
@@ -308,7 +320,7 @@ def get_document_by_hash(document_hash: str) -> dict[str, Any] | None:
         client.close()
 
 
-def get_document_storage(source_id: str) -> dict[str, Any]:
+def get_document_storage(source_id: str, project_id: str) -> dict[str, Any]:
     client = get_weaviate_client()
     stored_paths: set[str] = set()
     exists = False
@@ -318,6 +330,8 @@ def get_document_storage(source_id: str) -> dict[str, Any]:
         for item in collection.iterator(return_properties=DOCUMENT_RETURN_PROPERTIES):
             properties = item.properties or {}
             if str(properties.get("source_id") or "") != source_id:
+                continue
+            if str(properties.get("project_id") or "") != project_id:
                 continue
             exists = True
             stored_file_path = properties.get("stored_file_path")
@@ -330,15 +344,18 @@ def get_document_storage(source_id: str) -> dict[str, Any]:
         client.close()
 
 
-def count_documents_by_source_id(source_id: str) -> int:
+def count_documents_by_source_id(source_id: str, project_id: str) -> int:
     client = get_weaviate_client()
     count = 0
     try:
         ensure_collection(client)
         collection = client.collections.get(get_rag_settings().weaviate_collection)
-        for item in collection.iterator(return_properties=["source_id"]):
+        for item in collection.iterator(return_properties=["source_id", "project_id"]):
             properties = item.properties or {}
-            if str(properties.get("source_id") or "") == source_id:
+            if (
+                str(properties.get("source_id") or "") == source_id
+                and str(properties.get("project_id") or "") == project_id
+            ):
                 count += 1
         return count
     except WeaviateBaseError as exc:
@@ -347,12 +364,17 @@ def count_documents_by_source_id(source_id: str) -> int:
         client.close()
 
 
-def delete_documents_by_source_id(source_id: str) -> int:
+def delete_documents_by_source_id(source_id: str, project_id: str) -> int:
     client = get_weaviate_client()
     try:
         ensure_collection(client)
         collection = client.collections.get(get_rag_settings().weaviate_collection)
-        result = collection.data.delete_many(where=Filter.by_property("source_id").equal(source_id))
+        result = collection.data.delete_many(
+            where=(
+                Filter.by_property("source_id").equal(source_id)
+                & Filter.by_property("project_id").equal(project_id)
+            )
+        )
         return _deleted_count(result)
     except WeaviateBaseError as exc:
         raise RuntimeError(f"Could not delete documents from Weaviate: {exc}") from exc
@@ -379,6 +401,7 @@ def _document_properties(document: RagDocument) -> dict[str, Any]:
     metadata = document.metadata
     return {
         "text": document.page_content,
+        "project_id": _string_or_none(metadata.get("project_id")),
         "source_id": _string_or_none(metadata.get("source_id")),
         "filename": _string_or_none(metadata.get("filename")),
         "original_filename": _string_or_none(metadata.get("original_filename")),
@@ -402,6 +425,7 @@ def _object_to_document(item: Any) -> RagDocument:
     properties = item.properties or {}
     item_metadata = getattr(item, "metadata", None)
     metadata = {
+        "project_id": properties.get("project_id"),
         "source_id": properties.get("source_id"),
         "filename": properties.get("filename"),
         "original_filename": properties.get("original_filename"),
@@ -485,11 +509,14 @@ def _collection_property_names(collection: Any) -> set[str]:
     return set()
 
 
-def _content_hash_exists(collection: Any, content_hash: Any) -> bool:
+def _content_hash_exists(collection: Any, content_hash: Any, project_id: Any) -> bool:
     if not content_hash:
         return False
     response = collection.query.fetch_objects(
-        filters=Filter.by_property("content_hash").equal(str(content_hash)),
+        filters=(
+            Filter.by_property("content_hash").equal(str(content_hash))
+            & Filter.by_property("project_id").equal(str(project_id))
+        ),
         limit=1,
         return_properties=["content_hash"],
     )
