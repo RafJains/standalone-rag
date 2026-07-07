@@ -29,7 +29,7 @@ services:
       - rohan_huggingface_cache:/tmp/huggingface
     environment:
       RAG_ENABLED: "true"
-      RAG_WORKFLOW: "langchain"
+      RAG_WORKFLOW: "langgraph"
       RAG_VECTOR_DB: "weaviate"
       RAG_EMBEDDING_MODEL: "BAAI/bge-m3"
       WEAVIATE_URL: "http://weaviate:8080"

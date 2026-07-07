@@ -14,7 +14,7 @@ class RagSettings(BaseSettings):
     )
 
     rag_enabled: bool = True
-    rag_workflow: Literal["langchain"] = "langchain"
+    rag_workflow: Literal["langgraph"] = "langgraph"
     rag_vector_db: Literal["weaviate"] = "weaviate"
     rag_embedding_model: str = "BAAI/bge-m3"
 

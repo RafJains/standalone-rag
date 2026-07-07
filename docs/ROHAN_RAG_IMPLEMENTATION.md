@@ -10,7 +10,8 @@ Phase 6 keeps the RAG flow and adds saved originals, duplicate prevention,
 download support, clean delete, metadata-filtered retrieval, selectable vector
 or hybrid retrieval mode, richer source metadata, document processing upgrades,
 upload validation, processing diagnostics, retrieval evaluation, and a small
-FastAPI-served frontend.
+FastAPI-served frontend. Phase 6.5 migrates query orchestration to LangGraph
+while preserving the existing API and frontend behavior.
 
 RAG flow:
 
@@ -30,9 +31,11 @@ RAG flow:
 9. `app.vector_store.similarity_search` retrieves the most relevant chunks
    using vector search by default, optional metadata filters, and optional
    hybrid search when supported by Weaviate.
-10. `app.rag_chain` builds a grounded prompt and calls the configured local
-   OpenAI-compatible generator endpoint through LangChain.
-11. `/rag/query` returns the generated answer, sources, retrieved chunk count,
+10. `app.rag_graph` runs a LangGraph workflow with `retrieve`, `decide`,
+    `generate`, and `fallback` nodes.
+11. `app.rag_chain` keeps the grounded prompt and calls the configured local
+    OpenAI-compatible generator endpoint.
+12. `/rag/query` returns the generated answer, sources, retrieved chunk count,
     retrieval mode, and applied filters.
 
 Storage layout:
@@ -76,7 +79,7 @@ Frontend flow:
 - Document parsing: Docling
 - Embeddings: `BAAI/bge-m3`
 - Vector search: Weaviate
-- Workflow: LangChain
+- Workflow: LangGraph
 - Initial generator: Ministral 3 8B or 14B
 - Production generator: Mistral Small 4 Open through vLLM
 
@@ -216,6 +219,11 @@ curl -X POST "http://localhost:8090/rag/query" \
 When the configured local generator server is running, `/rag/query` returns a
 generated answer grounded in the retrieved chunks. The response includes
 `sources`, `retrieved_chunk_count`, `retrieval_mode`, and `filters_applied`.
+
+The query path is orchestrated by LangGraph. The `retrieve` node calls Weaviate
+vector or hybrid search with filters, `decide` routes based on whether chunks
+were found, `generate` calls the local OpenAI-compatible Ministral endpoint, and
+`fallback` returns the no-information answer without calling the generator.
 
 `top_k` controls the maximum number of chunks retrieved before answer
 generation. `retrieval_mode` defaults to `vector`, which embeds the question and
