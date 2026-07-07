@@ -20,7 +20,7 @@ def require_api_key(x_rag_api_key: str | None = Header(default=None)) -> None:
 
 def resolve_project_id(project_id: str | None) -> str:
     settings = get_rag_settings()
-    resolved = (project_id or settings.rag_default_project_id).strip()
+    resolved = settings.rag_default_project_id.strip() if project_id is None else project_id.strip()
     if not resolved:
         raise HTTPException(status_code=400, detail="project_id cannot be empty")
     if not re.fullmatch(settings.rag_project_id_pattern, resolved):

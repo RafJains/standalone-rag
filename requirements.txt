@@ -14,3 +14,4 @@ python-multipart
 pypdf
 transformers>=4.41,<5
 huggingface-hub<1
+pytest

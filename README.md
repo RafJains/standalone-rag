@@ -18,7 +18,8 @@ and processing evaluation. Phase 6.5 uses LangGraph for RAG workflow
 orchestration. Phase 7 removes the retired chain framework from project code and
 dependencies while preserving the existing ingestion, status, document,
 retrieval, query, and frontend behavior. Production Backend Hardening is now
-Phase 8, adding API key authentication and project-level isolation.
+Phase 8, adding API key authentication and project-level isolation. Phase 9 adds
+automated tests and a repeatable reliability check runner.
 
 The query workflow is a LangGraph graph with `retrieve`, `decide`, `generate`,
 and `fallback` nodes. Retrieval remains in Weaviate, embeddings remain
@@ -328,15 +329,31 @@ RAG_GENERATOR_MODEL=Mistral-Small-4-Open
 python scripts/validate_stack.py
 ```
 
+## Automated Tests
+
+Fast local unit and contract checks do not require live Weaviate or a live
+generator:
+
+```bash
+python3 -m pytest -q
+python3 scripts/run_quality_checks.py
+```
+
+The quality runner executes stack validation, Python compilation, the pytest
+suite, and a Compose service contract check.
+
 ## Retrieval Evaluation
 
-With the stack running on `http://localhost:8090`, run:
+The live evaluation scripts require the Docker stack and local generator to be
+running on `http://localhost:8090` and port `8001`:
 
 ```bash
 python3 scripts/evaluate_retrieval.py
+python3 scripts/evaluate_processing.py
+python3 scripts/evaluate_auth_projects.py
 ```
 
-The script ingests small generic policy documents, accepts duplicate ingest
+The retrieval script ingests small generic policy documents, accepts duplicate ingest
 responses, runs vector retrieval tests with `top_k=3`, checks `doc_type`
 filtering, checks the no-match filter response, and tests hybrid mode when
 available. A clear hybrid HTTP 400 is reported as unavailable and is acceptable.

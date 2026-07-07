@@ -7,7 +7,6 @@ from weaviate.classes.query import Filter, MetadataQuery
 from weaviate.exceptions import WeaviateBaseError
 
 from app.config import get_rag_settings
-from app.embeddings import get_embeddings
 from app.rag_types import RagDocument
 
 
@@ -107,7 +106,7 @@ def add_documents(documents: list[RagDocument]) -> tuple[int, int]:
         if not documents_to_index:
             return 0, skipped_count
 
-        embeddings = get_embeddings()
+        embeddings = _get_embeddings()
         texts = [doc.page_content for doc in documents_to_index]
         vectors = embeddings.embed_documents(texts)
 
@@ -137,7 +136,7 @@ def similarity_search(
     if retrieval_mode != "vector":
         raise ValueError(f"Unsupported retrieval_mode: {retrieval_mode}")
 
-    embeddings = get_embeddings()
+    embeddings = _get_embeddings()
     query_vector = embeddings.embed_query(query)
 
     client = get_weaviate_client()
@@ -163,7 +162,7 @@ def hybrid_search(
     top_k: int,
     filters: dict[str, str] | None = None,
 ) -> list[RagDocument]:
-    embeddings = get_embeddings()
+    embeddings = _get_embeddings()
     query_vector = embeddings.embed_query(query)
 
     client = get_weaviate_client()
@@ -475,6 +474,12 @@ def _metadata_query_with_score() -> MetadataQuery:
         return MetadataQuery(distance=True, score=True)
     except TypeError:
         return MetadataQuery(distance=True)
+
+
+def _get_embeddings():
+    from app.embeddings import get_embeddings
+
+    return get_embeddings()
 
 
 def _ensure_collection_properties(client: weaviate.WeaviateClient) -> None:

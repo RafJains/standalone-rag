@@ -16,7 +16,8 @@ retired chain framework from project code and dependencies, keeps LangGraph as
 the workflow layer, keeps Weaviate retrieval, keeps `BAAI/bge-m3` embeddings,
 and keeps the local OpenAI-compatible Ministral generator endpoint. Production
 Backend Hardening is now Phase 8, adding API key authentication and project
-isolation without adding services or changing the generic collection name.
+isolation without adding services or changing the generic collection name. Phase
+9 adds automated tests and a repeatable reliability check runner.
 
 RAG flow:
 
@@ -361,7 +362,23 @@ chunks, and download returns 404 with a clear message.
 
 ## Retrieval Evaluation
 
-With the stack running, execute:
+## Automated Tests And Quality Checks
+
+Fast local checks do not require live Weaviate or the local generator:
+
+```bash
+python3 -m pytest -q
+python3 scripts/run_quality_checks.py
+```
+
+The pytest suite covers auth, project ID validation, Pydantic schemas, generator
+request and error handling, document loading, LangGraph routing, and static stack
+contracts. The quality runner executes stack validation, Python compilation,
+pytest, and the Compose service contract.
+
+## Retrieval Evaluation
+
+With the stack and generator running, execute:
 
 ```bash
 python3 scripts/evaluate_retrieval.py
@@ -377,7 +394,7 @@ documented unavailable response.
 
 ## Processing Evaluation
 
-With the stack running, execute:
+With the stack and generator running, execute:
 
 ```bash
 python3 scripts/evaluate_processing.py
@@ -390,7 +407,7 @@ query with a filename filter.
 
 ## Auth And Project Evaluation
 
-With the stack running, execute:
+With the stack and generator running, execute:
 
 ```bash
 python3 scripts/evaluate_auth_projects.py
@@ -400,6 +417,10 @@ The script uses `http://localhost:8090`, ingests one text document into project
 `alpha` and one into project `beta`, verifies query isolation, verifies document
 list isolation, deletes the alpha source under project `alpha`, and confirms the
 beta document still exists.
+
+The live evaluation scripts exercise the API, Weaviate, embeddings, and the
+configured generator. They complement the pytest suite, which is intentionally
+fast and isolated from live services.
 
 ## Demo Documents
 
